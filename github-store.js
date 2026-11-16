@@ -7,7 +7,8 @@
   constructor({owner,repo,token,fetchImpl=fetch}){
    if(!/^[a-z\d](?:[a-z\d-]{0,38})$/i.test(owner)||!/^[\w.-]{1,100}$/.test(repo))throw Error('請填寫有效的 GitHub 帳號與倉庫名稱。');
    if(!token||/\s/.test(token))throw Error('請填寫有效的 GitHub 存取權杖。');
-   this.owner=owner;this.repo=repo;this.token=token;this.fetchImpl=fetchImpl;this.branch=null;this.sha=undefined;this.busy=false;
+   // Browser-native fetch requires the Window receiver, unlike Node and arrow mocks.
+   this.owner=owner;this.repo=repo;this.token=token;this.fetchImpl=fetchImpl.bind(root);this.branch=null;this.sha=undefined;this.busy=false;
   }
   async request(suffix='',options={}){
    let r;try{r=await this.fetchImpl(`https://api.github.com/repos/${this.owner}/${this.repo}${suffix}`,{...options,cache:'no-store',credentials:'omit',redirect:'error',signal:AbortSignal.timeout(20000),headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${this.token}`,'X-GitHub-Api-Version':'2022-11-28',...(options.body?{'Content-Type':'application/json'}:{})}});}catch{throw Error('無法連線 GitHub。帳目仍保留於本機，請稍後重試。');}

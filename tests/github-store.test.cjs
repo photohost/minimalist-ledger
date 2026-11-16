@@ -1,5 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),L=require('../core.js'),{GitHubStore,encode,decode}=require('../github-store.js');
 const reply=(status,data)=>({status,ok:status>=200&&status<300,json:async()=>data});
+test('瀏覽器 fetch 必須維持全域呼叫環境',async()=>{
+ const browserFetch=async function(){'use strict';if(this!==globalThis)throw new TypeError('Illegal invocation');return reply(200,{private:true,default_branch:'main'});};
+ const client=new GitHubStore({owner:'test',repo:'data',token:'test-token',fetchImpl:browserFetch});
+ await client.ensurePrivate();assert.equal(client.branch,'main');
+});
 function mock({data=null,sha=null,privateRepo=true}={}){
  const calls=[],remote={data,sha,privateRepo},client=new GitHubStore({owner:'tester',repo:'private-ledger',token:'test-token',fetchImpl:async(url,opt)=>{
   calls.push({url,opt});if(!url.includes('/contents/'))return reply(200,{private:remote.privateRepo,default_branch:'main'});
