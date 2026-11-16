@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-Hant">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f4ef"><title>日常留白 · 極簡記帳</title><link rel="stylesheet" href="style.css"><script defer src="core.js"></script><script defer src="github-store.js"></script><script defer src="app.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f4ef"><title>日常留白 · 極簡記帳</title><link rel="stylesheet" href="style.css?v=1.1.1"><script defer src="core.js?v=1.1.1"></script><script defer src="github-store.js?v=1.1.1"></script><script defer src="app.js?v=1.1.1"></script></head>
 <body>
 <header><a class="brand" href="./">日常留白<span>LESS, BUT ENOUGH.</span></a><div class="tools"><button id="cloudOpen">GitHub 儲存</button><button id="export">匯出備份</button><button id="import">匯入</button><input hidden id="file" type="file" accept="application/json,.json"></div></header>
 <main>
@@ -18,3 +18,4 @@
 <dialog id="cloud"><div class="dialog-heading"><h2>GitHub 儲存</h2><button id="cloudClose" aria-label="關閉 GitHub 設定">✕</button></div><p class="hint">帳目直接儲存至私人倉庫的 ledger.json，可在其他裝置下載接續記帳。</p><form id="cloudForm"><div class="fields"><label>GitHub 帳號<input id="cloudOwner" value="photohost" required autocomplete="off"></label><label>私人資料倉庫<input id="cloudRepo" value="minimalist-ledger-data" required autocomplete="off"></label></div><label>存取權杖<input id="cloudToken" type="password" required autocomplete="off" spellcheck="false" placeholder="只留在本頁，請勿貼到聊天"></label><p class="hint">使用 Fine-grained token，僅選擇資料倉庫，授予 Contents：Read and write。權杖只傳送至 api.github.com，不寫入帳目、備份或瀏覽器儲存。</p><p class="hint"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">前往 GitHub 建立權杖</a> · <a href="https://github.com/photohost/minimalist-ledger/blob/main/README.md" target="_blank" rel="noopener noreferrer">查看設定步驟</a></p><button class="primary" id="cloudConnect" type="submit">連線並檢查帳目</button></form><p id="cloudMessage" role="status" class="hint"></p><div id="cloudActions" hidden><p class="hint">首次連線或資料不同時，請選擇要保留的版本。選定後，每次記帳會自動上傳。下載／取代前會先匯出被取代的資料。</p><div class="cloud-actions"><button id="cloudPull">下載 GitHub 帳目</button><button id="cloudPush">上傳此裝置帳目</button><button id="cloudDisconnect">中斷連線</button></div></div></dialog>
 <div id="notice" role="status" class="toast" hidden></div>
 </body></html>
+
