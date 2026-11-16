@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f4ef"><title>日常留白 · 極簡記帳</title><link rel="stylesheet" href="style.css"><script defer src="core.js"></script><script defer src="app.js"></script></head>
+<body>
+<header><a class="brand" href="./">日常留白<span>LESS, BUT ENOUGH.</span></a><div class="tools"><button id="export">匯出備份</button><button id="import">匯入</button><input hidden id="file" type="file" accept="application/json,.json"></div></header>
+<main>
+<section class="intro"><div><p class="eyebrow">A LITTLE SPACE FOR EVERYDAY LIFE</p><h1>把生活，慢慢記下。</h1><p class="muted">每一筆清楚，每一天輕一點。</p></div><span id="saveStatus" role="status" class="save-status">資料僅儲存於此瀏覽器</span></section>
+<section class="period-bar"><div class="period-nav"><button id="prev" aria-label="上一期">←</button><div><h2 id="periodTitle"></h2><p id="periodRange" class="muted"></p></div><button id="next" aria-label="下一期">→</button></div><div class="tools"><input type="month" id="month" aria-label="選擇記帳週期起始月份"><button id="today">回到本期</button><button id="settings">本期設定</button></div></section>
+<section id="metrics" class="metrics" aria-label="本期總覽"></section>
+<section class="goal"><div><p class="eyebrow">2028 · 留給未來的自己</p><h3>存下 NT$200,000</h3><p id="goalText" class="muted"></p></div><div class="goal-track"><progress id="goalProgress" max="200000" value="0"></progress><p id="goalNote" class="muted"></p></div><button id="goalEdit">更新存款</button></section>
+<section class="calendar-section"><div class="section-heading"><div><h2>日常帳本</h2><p class="muted">點選早餐、午餐、晚餐或其他，記錄預算與實際金額。</p></div><span class="legend">○ 待完成　✓ 已完成</span></div><div id="weekdays" class="weekdays"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div id="calendar" class="calendar"></div></section>
+<section class="fixed-section"><div class="section-heading"><div><h2>固定支出</h2><p class="muted">本期只計入一次。在「其他」選擇對應固定支出，即可記錄付款。</p></div></div><div id="fixed" class="fixed-list"></div></section>
+<details class="help"><summary>計算方式與資料保存</summary><p>可用餘額＝本期收入－已花費；未付款的固定支出尚未扣除。預計可存＝收入－預估總支出。未完成項目取預算與實際較大者；完成項目取實際。空白代表未知，總計暫以 0 加總，並提醒尚未完整。</p><p>「其他」連結固定支出的付款，只更新固定支出的實際金額，不再增加一筆支出。信用卡費若包含已記錄消費，請只記未記過的款項，避免重複計算。</p><p>GitHub Pages 是靜態託管；帳目保存在本機瀏覽器，不會跨裝置同步。清除網站資料、無痕模式或更換網址／裝置可能遺失資料，請定期匯出 JSON 備份。備份含個人財務資料，請自行妥善保管。</p></details>
+<footer>日常留白 <span>簡單記錄，安心生活。</span></footer>
+</main>
+<dialog id="editor"><form id="editForm"><div class="dialog-heading"><h2 id="editTitle"></h2><button type="button" id="close" aria-label="關閉">✕</button></div><div id="editBody"></div><p id="editError" role="alert" class="error"></p><div class="dialog-actions"><button type="button" id="cancel">取消</button><button class="primary" type="submit">儲存</button></div></form></dialog>
+<div id="notice" role="status" class="toast" hidden></div>
+</body></html>
