@@ -1,6 +1,31 @@
-# 日常留白 · 極簡個人記帳 v1
+# 日常留白 · 極簡個人記帳 v1.1
 
-繁體中文、手機適配、無需安裝套件的個人記帳網頁。原始碼可公開，輸入的帳目只保存在使用者自己的瀏覽器，程式不會將帳目傳送到 GitHub。
+繁體中文、手機適配、無需安裝套件的個人記帳網頁。支援將帳目直接儲存至私人 GitHub 倉庫，並保留本機副本與備份匯出。
+
+## 啟用 GitHub 儲存
+
+公開網頁與私人帳目分開保存：
+
+- 網頁原始碼：`photohost/minimalist-ledger`（公開，GitHub Pages）。
+- 帳目：`photohost/minimalist-ledger-data`（私人），預設分支的 `ledger.json`。
+
+設定步驟：
+
+1. 在 [GitHub Fine-grained tokens](https://github.com/settings/personal-access-tokens/new) 建立權杖。這一步須由你本人操作，**不要將權杖貼到聊天或提交至倉庫**。
+2. Resource owner 選你的帳號；設定有效期限。Repository access 選 **Only select repositories**，只勾選 `minimalist-ledger-data`。
+3. Repository permissions 的 **Contents** 選 **Read and write**；Metadata 為 GitHub 必要的唯讀權限。不要授予網站原始碼倉庫或其他倉庫權限。
+4. 在正式 HTTPS 網站按「GitHub 儲存」，確認帳號與私人資料倉庫名稱，將權杖貼入密碼欄，按「連線並檢查帳目」。
+5. 第一次選「上傳此裝置帳目」。已有其他裝置帳目時，選「下載 GitHub 帳目」。版本不同不會自動覆寫；手動選擇取代前會確認並下載舊版本備份。
+6. 選定後，每次記帳先存本機，約 1.2 秒後將完整帳目寫入 GitHub。看到 **已同步至 GitHub** 才代表寫入完成。頁面離開前若仍有未同步資料會提示。
+7. 換裝置或重新整理後，重新輸入權杖並連線。帳目不同時先選下載；同一版本會直接啟用後續自動上傳。
+
+權杖僅留在本頁記憶體；關閉、重新整理或按「中斷連線」後不保留。權杖只透過 HTTPS Authorization header 傳到 `api.github.com`，不包含在 localStorage、JSON、下載備份或提交內容。未連線時依舊能記帳，但資料只有本機副本。**Codex 的 GitHub 連線不會自動成為網頁的登入權限**。
+
+上傳前會確認資料倉庫仍為私人，並核對檔案 SHA。偵測到其他裝置修改時暫停自動上傳，不會靜默覆寫。此版本不會自動合併兩台裝置的修改；請先備份本機帳目，再下載最新版並重填未同步部分。離線、權限錯誤或上傳結果不明時保留本機資料，可按「重試上傳」。網頁不會在背景關閉後上傳。
+
+帳目檔案上限為 900 KB，所有週期放在同一個檔案；上傳歷史會保留於 Git 提交紀錄。私人不等於端對端加密，具有倉庫權限的人及 GitHub 可存取內容。**請勿將資料倉庫改為公開**。
+
+設定依據 [GitHub 權杖文件](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) 及 [Contents API](https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28)。
 
 ## 開始使用
 
@@ -31,7 +56,7 @@
 
 ## 資料保存與限制
 
-GitHub Pages 是**靜態託管，沒有後端、帳號登入或跨裝置同步**。資料在 localStorage（`minimalist-ledger-v1`），依瀏覽器、使用者設定檔與網站來源分開保存。更換自訂網域、從本機網址換到正式站、清除網站資料、更換裝置、無痕模式，都可能讓資料不可見或遺失。
+GitHub Pages 是**靜態託管**；本工具由瀏覽器呼叫 GitHub API 同步私人倉庫。GitHub 未連線或未上傳完成的資料只在 localStorage（`minimalist-ledger-v1`），依瀏覽器、使用者設定檔與網站來源分開保存。更換自訂網域、從本機網址換到正式站、清除網站資料、更換裝置、無痕模式，都可能讓本機資料不可見或遺失；可重新連線下載已成功同步的版本。
 
 每次成功儲存前會保留上一版本於 `minimalist-ledger-v1-previous`。它只是同一瀏覽器內的補救資料，不是外部備份。讀取損壞或儲存失敗會明確提示，不顯示成功；損壞資料不自動覆寫，可先匯出原始內容，再匯入有效備份。多分頁衝突會拒絕覆寫並要求重新整理；v1 沒有協作編輯，請避免兩個分頁同時記帳。
 
@@ -47,7 +72,7 @@ npm start
 npm test
 ```
 
-也可直接開啟 `index.html`，但 file:// 的儲存行為依瀏覽器不同，建議使用固定 HTTP 網址或正式 Pages。部署只需 `index.html`、`style.css`、`core.js`、`app.js`，所有引用均為相對路徑。
+GitHub 儲存僅允許 HTTPS 或本機 localhost HTTP，不支援 file://。部署需 `index.html`、`style.css`、`core.js`、`github-store.js`、`app.js`，所有引用均為相對路徑。
 
 ## GitHub Pages 部署（獨立倉庫）
 
@@ -68,7 +93,8 @@ npm test
 - `style.css`：桌面月曆與手機每日卡片。
 - `core.js`：日期週期、計算與備份驗證；可供 Node 測試。
 - `app.js`：互動表單、localStorage、匯入匯出與衝突處理。
+- `github-store.js`：私人倉庫讀寫、UTF-8 編碼、SHA 衝突檢查與錯誤處理。
 - `server.cjs`：僅供本機預覽，只對本機介面提供網頁資源。
 - `tests/`：日期邊界、金額計算、備份與儲存失敗測試。
 
-v1 不含銀行串接、收據辨識、雲端同步、離線快取或自動存款入帳。
+v1.1 不含銀行串接、收據辨識、OAuth 登入、跨裝置自動合併、離線快取或自動存款入帳。
