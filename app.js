@@ -3,11 +3,12 @@
 const L=Ledger, $=s=>document.querySelector(s), KEY='minimalist-ledger-v1', BACKUP=KEY+'-previous';
 let state=L.initial(), raw=null, blocked=false, selected=L.cycleKey(), editing=null;
 let selectedDate=L.iso(new Date()),editingCycle=selected;
+let currentView='daily';
 const D=DailyLedger;
 let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(s){$('#notice').textContent=s;$('#notice').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').hidden=true,6000);}
+function toast(s){$('#notice').textContent=s;$('#notice').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').hidden=true,6000);toast.timer?.unref?.();}
 try{raw=localStorage.getItem(KEY);if(raw!==null)state=L.validate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
 function cycle(){return state.cycles[selected]||L.defaults();}
 function commit(candidate,fromCloud=false){
@@ -26,6 +27,7 @@ function render(){
  const c=cycle(),ds=L.dates(selected),s=L.stats({...c,key:selected});$('#month').value=selected;
  $('#periodTitle').textContent=`${selected.slice(0,4)} 年 ${Number(selected.slice(5))} 月`;
  $('#periodRange').textContent=ds[0].replaceAll('-','.')+' — '+ds.at(-1).replaceAll('-','.');
+ $('#settingsPeriod').textContent=`${selected.slice(0,4)} 年 ${Number(selected.slice(5))} 月 · ${ds[0].slice(5).replace('-','/')} 至 ${ds.at(-1).slice(5).replace('-','/')}`;
  const cards=[['本期預算',s.budget,'收入 NT$'+money(c.income)],['已花費',s.spent,'依實際金額累計'],['可用餘額',s.available,'收入 − 已花費（未扣預留）'],['本期預計可存',s.projected,'目標 NT$'+money(c.savingTarget)],['儲蓄目標差額',s.projected-c.savingTarget,s.unknown?'預算尚未填齊，估計可能偏高':'預計可存 − 月儲蓄目標']];
  $('#metrics').innerHTML=cards.map(([label,n,note])=>`<div class="metric"><p class="muted">${label}</p><strong class="${n<0?'negative':''}">${money(n)}</strong><small>${note}</small></div>`).join('');
  $('#goalProgress').value=state.savings??0;$('#goalProgress').setAttribute('aria-label','目前已存金額，目標二十萬元');
@@ -57,7 +59,7 @@ function editFixed(id,date){const x=cycle().fixed.find(x=>x.id===id),ds=L.dates(
 function editSettings(){const c=cycle();show('本期設定',`<p class="hint">只變更 ${selected} 這一期；其他週期保留各自設定。新週期使用已知預設值，餐費與未知費用留空。</p><div class="fields">${num('實領收入','income',c.income,true)}${num('月儲蓄目標','target',c.savingTarget,true)}</div><p class="hint">房租、訂閱、加油的預算與實際金額，請到下方固定支出編輯。水電等未知支出可於每日「其他」新增。</p>`,draft=>{draft.income=read('income',true);draft.savingTarget=read('target',true);});}
 function saveEditor(){try{const candidate=L.clone(state);candidate.cycles[editingCycle]??=L.defaults();editing(candidate.cycles[editingCycle],candidate);commit(candidate);$('#editor').close();render();return true;}catch(e){$('#editError').textContent=e.message||'儲存失敗，請匯出備份後重試。';return false;}}
 $('#editForm').onsubmit=e=>{e.preventDefault();saveEditor();};$('#close').onclick=$('#cancel').onclick=()=>$('#editor').close();
-$('#calendar').onclick=e=>{const b=e.target.closest('[data-date]');if(b){selectedDate=b.dataset.date;setOverview(false);openDayEntry(b.dataset.date,b.dataset.kind);}};
+$('#calendar').onclick=e=>{const b=e.target.closest('[data-date]');if(b){selectedDate=b.dataset.date;setView('daily');openDayEntry(b.dataset.date,b.dataset.kind);}};
 $('#fixed').onclick=e=>{const b=e.target.closest('[data-fixed]');if(b)editFixed(b.dataset.fixed);};
 function move(delta){const [y,m]=selected.split('-').map(Number),d=new Date(y,m-1+delta,5),key=L.cycleKey(d);if(+key.slice(0,4)<1900||+key.slice(0,4)>2200)return;selected=key;render();}
 $('#prev').onclick=()=>move(-1);$('#next').onclick=()=>move(1);$('#today').onclick=()=>{selected=L.cycleKey();render();};$('#month').min='1900-01';$('#month').max='2200-12';$('#month').onchange=e=>{if(e.target.checkValidity()&&e.target.value){selected=e.target.value;render();}};
@@ -81,16 +83,27 @@ function renderDaily(){
 }
 function openDayEntry(date,kind){selected=L.cycleKey(new Date(date+'T12:00:00'));kind==='other'?editOther(date):editMeal(date,Number(kind));}
 function changeDay(date,animate=true){if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<'1900-01-01'||date>'2200-12-31')return;selectedDate=date;renderDaily();if(animate&&typeof matchMedia==='function'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)$('#dailyCard').animate?.([{opacity:.35,transform:'translateY(8px)'},{opacity:1,transform:'translateY(0)'}],{duration:180});}
-function setOverview(open){$('#overview').hidden=!open;$('#dailyView').hidden=open;$('#overviewToggle').textContent=open?'返回每日':'查看總覽';$('#overviewToggle').setAttribute('aria-expanded',String(open));}
-$('#overviewToggle').onclick=()=>{const open=$('#overview').hidden;if(open){selected=L.cycleKey(new Date(selectedDate+'T12:00:00'));render();}setOverview(open);};
+const viewPanels={daily:'dailyView',overview:'overview',settings:'settingsView',about:'aboutView'};
+function setView(view){
+ if(!Object.hasOwn(viewPanels,view))return;
+ if(currentView==='daily'&&(view==='overview'||view==='settings'))selected=L.cycleKey(new Date(selectedDate+'T12:00:00'));
+ currentView=view;
+ for(const [name,id] of Object.entries(viewPanels)){const active=name===view;$('#'+id).hidden=!active;$('#tab-'+name).setAttribute('aria-selected',String(active));$('#tab-'+name).tabIndex=active?0:-1;}
+ render();
+}
+for(const name of Object.keys(viewPanels)){
+ const tab=$('#tab-'+name);tab.onclick=()=>setView(name);
+ tab.onkeydown=e=>{const names=Object.keys(viewPanels),index=names.indexOf(name);let next;if(e.key==='ArrowRight')next=(index+1)%names.length;else if(e.key==='ArrowLeft')next=(index+names.length-1)%names.length;else if(e.key==='Home')next=0;else if(e.key==='End')next=names.length-1;else return;e.preventDefault();setView(names[next]);$('#tab-'+names[next]).focus();};
+}
 $('#dayEntries').onclick=e=>{const b=e.target.closest('[data-kind]');if(b)openDayEntry(selectedDate,b.dataset.kind);};
 $('#dayPrev').onclick=()=>changeDay(D.shift(selectedDate,-1));$('#dayNext').onclick=()=>changeDay(D.shift(selectedDate,1));$('#dayToday').onclick=()=>changeDay(L.iso(new Date()));
 $('#dayDate').onchange=e=>{if(e.target.value&&e.target.checkValidity())changeDay(e.target.value);};
 const dayWatcher=D.watchDay(date=>{changeDay(date);if(!$('#overview').hidden){selected=L.cycleKey(new Date(date+'T12:00:00'));render();}toast('新的一天，已翻到今天的記帳卡片。');});
 window.addEventListener('focus',()=>dayWatcher.check());document.addEventListener?.('visibilitychange',()=>{if(!document.hidden)dayWatcher.check();});
 render();
+if(blocked)toast('無法讀取本機帳目，請到「設定」匯出原始資料或匯入有效備份。');
 
-function cloudText(message,error=false){$('#cloudStatus').textContent=message;$('#cloudMessage').textContent=message;$('#cloudStatus').classList.toggle('error',error);}
+function cloudText(message,error=false){$('#cloudStatus').textContent=message;$('#cloudMessage').textContent=message;$('#cloudStatus').classList.toggle('error',error);if(error)toast(message);}
 function cloudControls(){for(const id of ['cloudConnect','cloudPull','cloudPush','cloudDisconnect'])$('#'+id).disabled=cloudBusy;$('#cloudForm').hidden=!!cloudClient;$('#cloudActions').hidden=!cloudClient;}
 function currentJSON(){return JSON.stringify(state);}
 function queueCloud(){
