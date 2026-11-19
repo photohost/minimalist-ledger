@@ -2,6 +2,8 @@
 'use strict';
 const L=Ledger, $=s=>document.querySelector(s), KEY='minimalist-ledger-v1', BACKUP=KEY+'-previous';
 let state=L.initial(), raw=null, blocked=false, selected=L.cycleKey(), editing=null;
+let selectedDate=L.iso(new Date()),editingCycle=selected;
+const D=DailyLedger;
 let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -20,6 +22,7 @@ function commit(candidate,fromCloud=false){
 }
 function download(data,name){const u=URL.createObjectURL(new Blob([data],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);}
 function render(){
+ renderDaily();
  const c=cycle(),ds=L.dates(selected),s=L.stats({...c,key:selected});$('#month').value=selected;
  $('#periodTitle').textContent=`${selected.slice(0,4)} 年 ${Number(selected.slice(5))} 月`;
  $('#periodRange').textContent=ds[0].replaceAll('-','.')+' — '+ds.at(-1).replaceAll('-','.');
@@ -35,7 +38,7 @@ function render(){
  }$('#calendar').innerHTML=html;
  $('#fixed').innerHTML=c.fixed.map(x=>`<button class="fixed-card" data-fixed="${esc(x.id)}"><strong>${x.done?'✓':'○'} ${esc(x.name)}</strong><span>預算 NT$${money(x.budget)}　實際 ${x.actual===null?'未填':'NT$'+money(x.actual)}</span><span>${x.date?'付款日 '+x.date:'尚未指定付款日'}</span></button>`).join('');
 }
-function show(title,body,onSave){$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
+function show(title,body,onSave){editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
 function num(label,id,value,required=false){return `<label>${label}<input type="number" inputmode="decimal" min="0" max="1000000000" step="0.01" id="${id}" value="${value??''}" ${required?'required':''} placeholder="未知，留空"></label>`;}
 function read(id,required=false){const v=$('#'+id).value;if(v===''&&!required)return null;const n=Number(v);if(v===''||!L.validMoney(n,false))throw Error('請輸入 0 至 10 億、最多兩位小數的金額。');return n;}
 function checkbox(id,done){return `<label class="check"><input type="checkbox" id="${id}" ${done?'checked':''}>已完成（須填實際金額；無支出可填 0）</label>`;}
@@ -52,9 +55,9 @@ function editOther(date){const c=cycle(),rows=c.days[date]?.other||[];show(date+
 }
 function editFixed(id,date){const x=cycle().fixed.find(x=>x.id===id),ds=L.dates(selected);show(x.name+' · 固定支出',`<p class="hint">這筆支出整期只計算一次。可先填部分實際金額，付清後勾選完成。</p><div class="fields">${num('預算','fb',x.budget)}${num('實際金額（累計）','fa',x.actual)}</div><label>付款日（可留空）<input type="date" id="fdate" min="${ds[0]}" max="${ds.at(-1)}" value="${date||x.date||''}"></label>${checkbox('fd',x.done)}`,c=>{const y=c.fixed.find(y=>y.id===id);Object.assign(y,readItem('f'),{date:$('#fdate').value||null});});}
 function editSettings(){const c=cycle();show('本期設定',`<p class="hint">只變更 ${selected} 這一期；其他週期保留各自設定。新週期使用已知預設值，餐費與未知費用留空。</p><div class="fields">${num('實領收入','income',c.income,true)}${num('月儲蓄目標','target',c.savingTarget,true)}</div><p class="hint">房租、訂閱、加油的預算與實際金額，請到下方固定支出編輯。水電等未知支出可於每日「其他」新增。</p>`,draft=>{draft.income=read('income',true);draft.savingTarget=read('target',true);});}
-function saveEditor(){try{const candidate=L.clone(state);candidate.cycles[selected]??=L.defaults();editing(candidate.cycles[selected],candidate);commit(candidate);$('#editor').close();render();return true;}catch(e){$('#editError').textContent=e.message||'儲存失敗，請匯出備份後重試。';return false;}}
+function saveEditor(){try{const candidate=L.clone(state);candidate.cycles[editingCycle]??=L.defaults();editing(candidate.cycles[editingCycle],candidate);commit(candidate);$('#editor').close();render();return true;}catch(e){$('#editError').textContent=e.message||'儲存失敗，請匯出備份後重試。';return false;}}
 $('#editForm').onsubmit=e=>{e.preventDefault();saveEditor();};$('#close').onclick=$('#cancel').onclick=()=>$('#editor').close();
-$('#calendar').onclick=e=>{const b=e.target.closest('[data-date]');if(b){b.dataset.kind==='other'?editOther(b.dataset.date):editMeal(b.dataset.date,Number(b.dataset.kind));}};
+$('#calendar').onclick=e=>{const b=e.target.closest('[data-date]');if(b){selectedDate=b.dataset.date;setOverview(false);openDayEntry(b.dataset.date,b.dataset.kind);}};
 $('#fixed').onclick=e=>{const b=e.target.closest('[data-fixed]');if(b)editFixed(b.dataset.fixed);};
 function move(delta){const [y,m]=selected.split('-').map(Number),d=new Date(y,m-1+delta,5),key=L.cycleKey(d);if(+key.slice(0,4)<1900||+key.slice(0,4)>2200)return;selected=key;render();}
 $('#prev').onclick=()=>move(-1);$('#next').onclick=()=>move(1);$('#today').onclick=()=>{selected=L.cycleKey();render();};$('#month').min='1900-01';$('#month').max='2200-12';$('#month').onchange=e=>{if(e.target.checkValidity()&&e.target.value){selected=e.target.value;render();}};
@@ -64,6 +67,27 @@ $('#import').onclick=()=>$('#file').click();$('#file').onchange=async e=>{const 
  if(raw!==null)download(raw,`minimalist-before-import-${Date.now()}.json`);
  const previousBlocked=blocked;blocked=false;try{commit(candidate);}catch(err){blocked=previousBlocked;throw err;}render();toast('備份已匯入。');}catch(err){toast(err.message||'匯入失敗，原資料保持不變。');}finally{e.target.value='';}};
 window.addEventListener('storage',e=>{if(e.key===KEY){cloudAuto=false;clearTimeout(cloudTimer);if(cloudClient)cloudText('另一分頁已變更帳目 · 自動上傳已暫停，請重新整理',true);toast('另一分頁已變更資料，請重新整理後繼續。');$('#saveStatus').textContent='資料已在另一分頁變更，請重新整理';}});
+function renderDaily(){
+ const key=L.cycleKey(new Date(selectedDate+'T12:00:00')),c=state.cycles[key]||L.defaults(),s=D.summary(c,selectedDate),date=new Date(selectedDate+'T12:00:00');
+ $('#dayTitle').textContent=`${date.getMonth()+1} 月 ${date.getDate()} 日`;
+ $('#dayWeek').textContent=`${date.getFullYear()} 年 · 星期${'日一二三四五六'[date.getDay()]}`;
+ $('#dayBadge').textContent=selectedDate===L.iso(new Date())?'今天':'日常記錄';$('#dayDate').value=selectedDate;
+ $('#dayEntries').innerHTML=s.entries.map((x,i)=>`<button class="daily-entry ${x.done?'done':''}" data-kind="${x.kind}" aria-label="${selectedDate} ${x.name}"><span class="entry-symbol" aria-hidden="true">${['早','午','晚','＋'][i]}</span><span class="daily-entry-copy"><strong>${x.name}</strong><span>${x.actual!==null?'NT$ '+money(x.actual):x.budget!==null?'預算 NT$ '+money(x.budget):'點選記帳'}</span></span><span class="entry-status" aria-label="${x.done?'已完成':'待記錄'}">${x.done?'✓':'＋'}</span></button>`).join('');
+ $('#daySpent').textContent='NT$ '+money(s.spent);
+ $('#dayBudget').textContent=s.ratio===null?'尚未設定本期預算':`本期預算已用 ${s.ratio.toFixed(1)}%`;
+ $('#dayBudgetNote').textContent=s.ratio===null?'':s.incomplete?'依目前已填預算計算':'本期花費 ÷ 本期預算';
+ $('#dayBudget').classList.toggle('negative',s.ratio!==null&&s.ratio>100);
+ $('#dayPrev').disabled=selectedDate<='1900-01-01';$('#dayNext').disabled=selectedDate>='2200-12-31';
+}
+function openDayEntry(date,kind){selected=L.cycleKey(new Date(date+'T12:00:00'));kind==='other'?editOther(date):editMeal(date,Number(kind));}
+function changeDay(date,animate=true){if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<'1900-01-01'||date>'2200-12-31')return;selectedDate=date;renderDaily();if(animate&&typeof matchMedia==='function'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)$('#dailyCard').animate?.([{opacity:.35,transform:'translateY(8px)'},{opacity:1,transform:'translateY(0)'}],{duration:180});}
+function setOverview(open){$('#overview').hidden=!open;$('#dailyView').hidden=open;$('#overviewToggle').textContent=open?'返回每日':'查看總覽';$('#overviewToggle').setAttribute('aria-expanded',String(open));}
+$('#overviewToggle').onclick=()=>{const open=$('#overview').hidden;if(open){selected=L.cycleKey(new Date(selectedDate+'T12:00:00'));render();}setOverview(open);};
+$('#dayEntries').onclick=e=>{const b=e.target.closest('[data-kind]');if(b)openDayEntry(selectedDate,b.dataset.kind);};
+$('#dayPrev').onclick=()=>changeDay(D.shift(selectedDate,-1));$('#dayNext').onclick=()=>changeDay(D.shift(selectedDate,1));$('#dayToday').onclick=()=>changeDay(L.iso(new Date()));
+$('#dayDate').onchange=e=>{if(e.target.value&&e.target.checkValidity())changeDay(e.target.value);};
+const dayWatcher=D.watchDay(date=>{changeDay(date);if(!$('#overview').hidden){selected=L.cycleKey(new Date(date+'T12:00:00'));render();}toast('新的一天，已翻到今天的記帳卡片。');});
+window.addEventListener('focus',()=>dayWatcher.check());document.addEventListener?.('visibilitychange',()=>{if(!document.hidden)dayWatcher.check();});
 render();
 
 function cloudText(message,error=false){$('#cloudStatus').textContent=message;$('#cloudMessage').textContent=message;$('#cloudStatus').classList.toggle('error',error);}
