@@ -1,6 +1,7 @@
 /* 日常留白 — GitHub private-repository sync; no external dependencies. */
 'use strict';
-const L=Ledger, $=s=>document.querySelector(s), KEY='minimalist-ledger-v1', BACKUP=KEY+'-previous';
+const L=Ledger, $=s=>document.querySelector(s), LOCAL_KEY='minimalist-ledger-v1';
+let KEY=LOCAL_KEY,BACKUP=KEY+'-previous',ledgerStorage=localStorage,googleMode=false,accountSwitching=false;
 let state=L.initial(), raw=null, blocked=false, selected=L.cycleKey(), editing=null;
 let selectedDate=L.iso(new Date()),editingCycle=selected;
 let currentView='daily';
@@ -10,16 +11,17 @@ let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(s){$('#notice').textContent=s;$('#notice').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').hidden=true,6000);toast.timer?.unref?.();}
-try{raw=localStorage.getItem(KEY);if(raw!==null)state=L.migrate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
+try{raw=ledgerStorage.getItem(KEY);if(raw!==null)state=L.migrate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
 function cycle(){return state.cycles[selected]||L.defaults();}
 function commit(candidate,fromCloud=false){
+ if(accountSwitching)throw Error("正在切換帳號，請稍候再記帳。");
  if(blocked)throw Error('目前儲存不可用，請先匯出原始資料並匯入有效備份。');
  candidate=L.migrate(candidate);
- if(localStorage.getItem(KEY)!==raw)throw Error('另一個分頁已更新資料。請先重新整理，再輸入本次變更。');
+ if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一個分頁已更新資料。請先重新整理，再輸入本次變更。');
  const next=JSON.stringify(candidate);
- if(raw!==null)localStorage.setItem(BACKUP,raw);
- localStorage.setItem(KEY,next);raw=next;state=candidate;
- $('#saveStatus').textContent='已儲存於此瀏覽器 · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+ if(raw!==null)ledgerStorage.setItem(BACKUP,raw);
+ ledgerStorage.setItem(KEY,next);raw=next;state=candidate;
+ $('#saveStatus').textContent=(googleMode?'已儲存於此分頁 · ':'已儲存於此瀏覽器 · ')+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
  if(!fromCloud)queueCloud();
 }
 function download(data,name){const u=URL.createObjectURL(new Blob([data],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);}
@@ -60,7 +62,7 @@ function renderAnalysis(c){
  $('#budgetSummary').classList.toggle('negative',c.income!==null&&s.allocation>c.income);
  if(c.income!==null&&s.allocation>c.income)$('#budgetSummary').textContent+=' · 配置超過收入 NT$'+money(s.allocation-c.income);
 }
-function show(title,body,onSave){editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
+function show(title,body,onSave){if(accountSwitching){toast("正在切換帳號，請稍候。");return;}editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
 function num(label,id,value,required=false){return `<label>${label}<input type="number" inputmode="decimal" min="0" max="1000000000" step="0.01" id="${id}" value="${value??''}" ${required?'required':''} placeholder="未知，留空"></label>`;}
 function read(id,required=false){const v=$('#'+id).value;if(v===''&&!required)return null;const n=Number(v);if(v===''||!L.validMoney(n,false))throw Error('請輸入 0 至 10 億、最多兩位小數的金額。');return n;}
 function checkbox(id,done){return `<label class="check"><input type="checkbox" id="${id}" ${done?'checked':''}>已完成（須填實際金額；無支出可填 0）</label>`;}
@@ -139,6 +141,7 @@ function cloudText(message,error=false){$('#cloudStatus').textContent=message;$(
 function cloudControls(){for(const id of ['cloudConnect','cloudPull','cloudPush','cloudDisconnect'])$('#'+id).disabled=cloudBusy;$('#cloudForm').hidden=!!cloudClient;$('#cloudActions').hidden=!cloudClient;}
 function currentJSON(){return JSON.stringify(state);}
 function queueCloud(){
+ if(googleMode){googleQueue();return;}
  if(!cloudClient||!cloudAuto)return;
  clearTimeout(cloudTimer);cloudText('已存本機 · 等待上傳 GitHub');
  cloudTimer=setTimeout(flushCloud,1200);
@@ -146,16 +149,16 @@ function queueCloud(){
 async function flushCloud(){
  if(!cloudClient||!cloudAuto||cloudBusy)return;
  const snapshot=currentJSON();cloudBusy=true;cloudControls();cloudText('已存本機 · 正在上傳 GitHub…');
- try{if(localStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto)cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));}
+ try{if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto)cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));}
  catch(e){cloudAuto=false;$('#cloudRetry').hidden=false;cloudText('僅存本機 · '+e.message,true);}
  finally{cloudBusy=false;cloudControls();if(cloudAuto&&currentJSON()!==cloudSynced)queueCloud();}
 }
-function guardCloud(){if(cloudBusy)throw Error('GitHub 正在處理上一個操作，請稍候。');if(!cloudClient)throw Error('請先連線 GitHub。');if($('#editor').open)throw Error('請先儲存或關閉目前的編輯視窗。');}
+function guardCloud(){if(googleMode||accountSwitching)throw Error('請先登出 Google，再使用 GitHub。');if(cloudBusy)throw Error('GitHub 正在處理上一個操作，請稍候。');if(!cloudClient)throw Error('請先連線 GitHub。');if($('#editor').open)throw Error('請先儲存或關閉目前的編輯視窗。');}
 $('#cloudOpen').onclick=()=>{$('#cloud').showModal();cloudControls();};
 $('#cloudClose').onclick=()=>{$('#cloudToken').value='';$('#cloud').close();};
 $('#cloud').addEventListener('close',()=>{$('#cloudToken').value='';});
 $('#cloudForm').onsubmit=async e=>{
- e.preventDefault();if(cloudBusy)return;cloudBusy=true;cloudControls();cloudText('正在檢查私人資料倉庫…');
+ e.preventDefault();if(googleMode||accountSwitching){cloudText('請先登出 Google，再使用 GitHub。',true);return;}if(cloudBusy)return;cloudBusy=true;cloudControls();cloudText('正在檢查私人資料倉庫…');
  let client;
  try{
   if(location.protocol!=='https:'&&!['127.0.0.1','localhost'].includes(location.hostname))throw Error('請使用 HTTPS 正式網站連線 GitHub。');
