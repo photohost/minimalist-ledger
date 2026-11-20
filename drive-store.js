@@ -7,10 +7,10 @@
  function message(e){return e?.message||'Google Drive 操作未完成，請稍後重試。';}
  class DriveStore{
   constructor({token,user,clientId,expiresAt=0,fetchImpl=root.fetch,now=Date.now}){this.token=token;this.user=user;this.uid=user.uid;this.projectId=clientId;this.expiresAt=expiresAt;this.now=now;this.fetchImpl=fetchImpl.bind(root);this.revision=undefined;this.busy=false;this.folderId=null;this.pending=null;this.preferredId=null;}
-  check(){if(!this.token||(this.expiresAt&&this.now()>=this.expiresAt))throw Error('Google 授權已到期。請先匯出未同步備份，登出後重新登入；目前帳目仍留在此分頁。');}
+  check(){if(!this.token||(this.expiresAt&&this.now()>=this.expiresAt))throw Error('Google 授權已到期。請重新登入同一帳號繼續同步；目前帳目仍留在此瀏覽器。');}
   disconnect(){this.token='';}
   async request(path,{method='GET',body,headers={},text=false}={}){
-   this.check();let r;try{r=await this.fetchImpl(path.startsWith('https://')?path:API+path,{method,body,headers:{Authorization:'Bearer '+this.token,...headers},credentials:'omit',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)});}catch{throw Error('無法連線 Google Drive。資料仍留在此分頁，請稍後重試。');}
+   this.check();let r;try{r=await this.fetchImpl(path.startsWith('https://')?path:API+path,{method,body,headers:{Authorization:'Bearer '+this.token,...headers},credentials:'omit',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)});}catch{throw Error('無法連線 Google Drive。資料仍留在此瀏覽器，請稍後重試。');}
    this.check();if(!r.ok){
     let details={};try{details=await r.json();}catch{}
     const error=details?.error||{},reasons=[...(Array.isArray(error.errors)?error.errors.map(x=>x.reason):[]),...(Array.isArray(error.details)?error.details.map(x=>x.reason):[]),error.status].filter(x=>typeof x==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(x));
@@ -23,22 +23,37 @@
      [['insufficientFilePermissions','appNotAuthorizedToFile'],'目前帳號沒有此 Drive 檔案的存取權。請確認登入正確帳號，並由原本建立帳目的網站讀取。']
     ];
     let info=mappings.find(([codes])=>codes.some(c=>reasons.includes(c)))?.[1];
-    if(r.status===401)info='Google 授權已到期或撤銷。請匯出備份後重新登入。';
+    if(r.status===401)info='Google 授權已到期或撤銷。請重新登入同一帳號繼續同步。';
     if(r.status===404)info='Drive 帳目檔案已移除或無存取權，請重新讀取雲端。';
     if(r.status===429&&!info)info='Google Drive 請求過於頻繁，請稍後重試。';
     const code=reasons[0]||'HTTP_'+r.status;
-    const failure=Error((info||'Google Drive 拒絕此操作，請將以下代碼提供給網站管理者。')+'（'+r.status+' / '+code+'）目前帳目仍留在此分頁。');failure.code=code;failure.status=r.status;throw failure;
+    const failure=Error((info||'Google Drive 拒絕此操作，請將以下代碼提供給網站管理者。')+'（'+r.status+' / '+code+'）目前帳目仍留在此瀏覽器。');failure.code=code;failure.status=r.status;throw failure;
    }
    return text?await r.text():await r.json();
   }
   async list(query){let files=[],pageToken='';do{const p=new URLSearchParams({q:query,spaces:'drive',pageSize:'1000',fields:'nextPageToken,files(id,name,modifiedTime,appProperties)',...(pageToken?{pageToken}:{})});const r=await this.request('files?'+p);if(!Array.isArray(r.files))throw Error('Drive 檔案清單格式錯誤。');files.push(...r.files);pageToken=r.nextPageToken||'';if(files.length>20000)throw Error('帳目版本過多，請先匯出備份並整理 Drive 資料夾。');}while(pageToken);return files;}
-  async heads(){const files=await this.list("trashed = false and appProperties has { key='ledger' and value='minimalist-v1' }");const parents=new Set();for(const f of files)for(const [k,v]of Object.entries(f.appProperties||{}))if(/^p\d+$/.test(k))parents.add(v);return files.filter(f=>!parents.has(f.id)).sort((a,b)=>a.id.localeCompare(b.id));}
-  async read(){const heads=await this.heads(),revision=heads.map(x=>x.id).join(',');if(!heads.length)return {revision:'',data:null};let chosen=heads[0];if(heads.length>1){chosen=heads.find(x=>x.id===this.preferredId);if(!chosen)return {revision,data:null,conflicts:heads};}const text=await this.request('files/'+encodeURIComponent(chosen.id)+'?alt=media',{text:true});if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('Drive 帳目超過大小上限，未覆寫資料。');let data;try{data=L.migrate(JSON.parse(text));}catch{throw Error('Drive 帳目格式錯誤，未覆寫目前帳目。');}return {revision,data,heads:heads.map(x=>x.id)};}
+  async read(){
+   const files=await this.list("trashed = false and appProperties has { key='ledger' and value='minimalist-v1' }");
+   const parentsById=new Map(files.map(file=>[file.id,Object.entries(file.appProperties||{}).filter(([key])=>/^p\d+$/.test(key)).map(([,id])=>id)]));
+   const parentIds=new Set([...parentsById.values()].flat());
+   const heads=files.filter(file=>!parentIds.has(file.id)).sort((a,b)=>a.id.localeCompare(b.id));
+   const revision=heads.map(file=>file.id).join(',');
+   if(!heads.length){if(files.length)throw Error('Drive 帳目版本關係異常，請先保留本機帳目。');return {revision:'',data:null};}
+   const chosen=heads.length===1?heads[0]:heads.find(file=>file.id===this.preferredId);
+   if(!chosen)return {revision,data:null,conflicts:heads};
+   const reachable=new Set(),remaining=heads.map(file=>file.id);
+   while(remaining.length){const id=remaining.pop();if(reachable.has(id))continue;reachable.add(id);remaining.push(...(parentsById.get(id)||[]));}
+   const extendsLocal=!this.revision||this.revision.split(',').every(id=>reachable.has(id));
+   const text=await this.request('files/'+encodeURIComponent(chosen.id)+'?alt=media',{text:true});
+   if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('Drive 帳目超過大小上限，未覆寫資料。');
+   let data;try{data=L.migrate(JSON.parse(text));}catch{throw Error('Drive 帳目格式錯誤，未覆寫目前帳目。');}
+   return {revision,data,heads:heads.map(file=>file.id),extendsLocal};
+  }
   accept(remote){if(remote.conflicts)throw Error('請先選擇衝突版本。');this.revision=remote.revision;this.pending=null;}
   async folder(){if(this.folderId)return this.folderId;const folders=await this.list("trashed = false and mimeType = 'application/vnd.google-apps.folder' and appProperties has { key='ledgerFolder' and value='minimalist-v1' }");if(folders.length)this.folderId=folders[0].id;else{const f=await this.request('files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'日常留白記帳',mimeType:'application/vnd.google-apps.folder',appProperties:{ledgerFolder:'minimalist-v1'}})});this.folderId=f.id;}return this.folderId;}
   async save(data){
    this.check();if(this.busy)throw Error('上一筆 Drive 儲存尚未完成。');if(this.revision===undefined)throw Error('請先選擇要使用的帳目版本。');const text=payload(data);this.busy=true;
-   try{const remote=await this.read();if(remote.conflicts)throw Error('Drive 有多個同時編輯的版本，請先讀取雲端並選擇版本。');if(remote.data&&payload(remote.data)===text&&!remote.revision.includes(',')){this.revision=remote.revision;this.pending=null;return;}if(remote.revision!==this.revision)throw Error('另一裝置已更新帳目。請匯出此分頁備份，再讀取雲端或確認取代。');const parents=remote.revision?remote.revision.split(','):[];if(parents.length>24)throw Error('衝突版本過多，請先備份並整理 Drive。');
+   try{const remote=await this.read();if(remote.conflicts)throw Error('Drive 有多個同時編輯的版本，請先讀取雲端並選擇版本。');if(remote.data&&payload(remote.data)===text&&remote.extendsLocal&&!remote.revision.includes(',')){this.revision=remote.revision;this.pending=null;return;}if(remote.revision!==this.revision)throw Error('另一裝置已更新帳目。請匯出此瀏覽器備份，再讀取雲端或確認取代。');const parents=remote.revision?remote.revision.split(','):[];if(parents.length>24)throw Error('衝突版本過多，請先備份並整理 Drive。');
     const folderId=await this.folder();if(!this.pending||this.pending.text!==text||this.pending.base!==this.revision){const ids=await this.request('files/generateIds?count=1&space=drive');if(!ids.ids?.[0])throw Error('Drive 無法建立檔案 ID。');this.pending={id:ids.ids[0],text,base:this.revision};}
     const id=this.pending.id,metadata={id,name:'日常留白-'+new Date(this.now()).toISOString().replace(/[:.]/g,'-')+'.json',mimeType:'application/json',parents:[folderId],appProperties:{ledger:'minimalist-v1',...Object.fromEntries(parents.map((p,i)=>['p'+i,p]))}},boundary='ledger_upload_boundary',body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(metadata)+'\r\n--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+text+'\r\n--'+boundary+'--';
     // Append an immutable version: concurrent writers cannot destroy one another's data.

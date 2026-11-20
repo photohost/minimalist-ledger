@@ -87,10 +87,10 @@ window.LEDGER_GOOGLE_CONFIG = {
 
 - 這是靜態網站的 Google 官方瀏覽器授權流程，Google 負責帳號選擇、登入與同意；網站不接收你的 Google 密碼。
 - Access token 僅保留於記憶體，不寫入帳本、本機儲存或備份；沒有伺服器保存 refresh token。
-- Google 授權到期後需重新登入，不承諾長期背景同步。先匯出未同步備份再登出／重登。
+- Google 授權到期時，登出再登入同一帳號即可接續同步。
 - 登出是斷開本網站的 Drive 連線，不會登出整個瀏覽器的 Google 帳號。若要撤銷應用程式權限，可至 https://myaccount.google.com/connections 管理。
-- 帳號帳本暫存於本分頁的 sessionStorage，重新整理後需再次登入；關閉分頁可能失去尚未同步內容。
-- 離線時可繼續記帳；請保留分頁與備份，恢復連線後按「上傳此分頁」核對版本再同步。
+- 每次儲存先將帳目寫到同一瀏覽器的本機儲存，按 Google 帳號隔離。關頁、重新整理或登出後，登入同一帳號即可取回。清除網站資料或結束無痕工作階段可能移除尚未同步的本機資料。
+- 網站開著時可離線儲存。重連時會核對 Drive 版本再補傳。已關閉的網站要等重新開啟並登入才會同步。雲端版本若已變更或暫時讀到較舊版本，會先保留本機資料，等你確認再處理。
 - GitHub 與 Drive 擇一自動同步，登入 Drive 會停止 GitHub 上傳。
 
 ## 排查
@@ -100,12 +100,12 @@ window.LEDGER_GOOGLE_CONFIG = {
 | origin_mismatch | Client 必須為網頁類型；JavaScript 來源是 `https://blog.harunoji.one`，沒有路徑 |
 | access_denied／無法登入 | 測試名單是否加入你的帳號，是否拒絕檔案權限 |
 | Drive 無法存取 | Drive API 已啟用、授權有同意檔案範圍、Drive 有空間 |
-| 權杖到期 | 先匯出備份，再登出重新登入；不要刪除帳目 |
+| 權杖到期 | 登出後登入同一 Google 帳號繼續同步 |
 | 沒讀到原帳目 | 相同 OAuth 專案／用戶端 ID 與相同 Google 帳號；Firebase 舊帳目須明確移轉 |
 | 多個同時編輯版本 | 在 Google 帳號視窗選擇要採用的版本；其他版本仍留在 Drive |
 
 ## 驗證
 
-自動測試涵蓋檔案建立、版本關係、雙裝置分支、選版整合、離線與到期、成功回應遺失、限定權限與權杖清除。沒有你的 OAuth Client ID 及真人授權前，無法宣稱已完成實際 Drive 上傳驗證。
+自動測試涵蓋檔案建立、版本關係、雙裝置分支、選版整合、離線與到期、成功回應遺失、限定權限與權杖清除。關頁重開、離線回復與帳號隔離使用測試帳目及模擬 Drive 回應驗證。
 
 官方文件：[Google 官方瀏覽器授權](https://developers.google.com/identity/oauth2/web/guides/use-token-model)、[Drive 檔案權限](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)、[Drive 上傳與安全重試](https://developers.google.com/workspace/drive/api/guides/manage-uploads)。

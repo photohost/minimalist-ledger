@@ -30,7 +30,7 @@ function commit(candidate,fromCloud=false){
  const next=JSON.stringify(candidate);
  if(raw!==null)ledgerStorage.setItem(BACKUP,raw);
  ledgerStorage.setItem(KEY,next);raw=next;state=candidate;
- $('#saveStatus').textContent=(googleMode?'已儲存於此分頁 · ':'已儲存於此瀏覽器 · ')+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+ $('#saveStatus').textContent='已儲存於此瀏覽器 · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
  if(!fromCloud)queueCloud();
 }
 function download(data,name){const u=URL.createObjectURL(new Blob([data],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);}
@@ -104,7 +104,7 @@ $('#prev').onclick=()=>move(-1);$('#next').onclick=()=>move(1);$('#today').oncli
 for(const id of ['settingsMonth','analysisMonth']){$('#'+id).min='1900-01';$('#'+id).max='2200-12';$('#'+id).onchange=e=>{if(e.target.checkValidity()&&e.target.value){selected=e.target.value;render();}};}
 $('#settings').onclick=editSettings;$('#goalEdit').onclick=()=>show('更新目前存款',`${num('目前已存金額（所有週期共用）','savings',state.savings)}<p class="hint">請填入你目前已存下的金額；本工具不會將月結餘自動加入存款。期末估計＝此金額＋所選本期預計可存，請於期初更新基準，避免重複加上已存入的金額。未知時留空。</p>`,(c,s)=>{s.savings=read('savings');});
 $('#export').onclick=()=>download(blocked?(raw||JSON.stringify(state)):JSON.stringify(state,null,2),`minimalist-${L.iso(new Date())}${blocked?'-recovery':''}.json`);
-$('#import').onclick=()=>$('#file').click();$('#file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>10*1024*1024)throw Error('備份上限為 10 MB。');const candidate=L.validate(JSON.parse(await file.text()));if(!confirm(`備份包含 ${Object.keys(candidate.cycles).length} 個週期。匯入會取代所有目前帳目；系統會先下載目前資料備份。確定匯入？`))return;
+$('#import').onclick=()=>$('#file').click();$('#file').onchange=async e=>{const file=e.target.files[0];if(!file)return;const importKey=KEY,importRaw=raw;try{if(file.size>10*1024*1024)throw Error('備份上限為 10 MB。');const candidate=L.validate(JSON.parse(await file.text()));if(KEY!==importKey||raw!==importRaw)throw Error('帳號或帳目已變更，請重新選擇備份。');if(!confirm(`備份包含 ${Object.keys(candidate.cycles).length} 個週期。匯入會取代所有目前帳目；系統會先下載目前資料備份。確定匯入？`))return;
  if(raw!==null)download(raw,`minimalist-before-import-${Date.now()}.json`);
  const previousBlocked=blocked;blocked=false;try{commit(candidate);}catch(err){blocked=previousBlocked;throw err;}render();toast('備份已匯入。');}catch(err){toast(err.message||'匯入失敗，原資料保持不變。');}finally{e.target.value='';}};
 window.addEventListener('storage',e=>{if(e.key===KEY){cloudAuto=false;clearTimeout(cloudTimer);if(cloudClient)cloudText('另一分頁已變更帳目 · 自動上傳已暫停，請重新整理',true);toast('另一分頁已變更資料，請重新整理後繼續。');$('#saveStatus').textContent='資料已在另一分頁變更，請重新整理';}});
