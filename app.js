@@ -103,7 +103,7 @@ function renderDaily(){
  $('#dayWeek').textContent=`${date.getFullYear()} 年 · 星期${'日一二三四五六'[date.getDay()]}`;
  const isToday=selectedDate===L.iso(new Date());
  $('#dailyCard').classList.toggle('is-other-day',!isToday);$('#dailyCard').classList.toggle('is-over-budget',s.overspent);
- $('#dayBadge').textContent=s.overspent?'當日超支':isToday?'今天':'非今日';$('#dayDate').value=selectedDate;
+ $('#dayBadge').textContent=s.overspent?'當日超支':isToday?'今天':'非今日';
  $('#dayEntries').innerHTML=s.entries.map((x,i)=>`<button class="daily-entry ${x.actual!==null?'done':''}" data-kind="${x.kind}" aria-label="${selectedDate} ${x.name}"><span class="entry-symbol" aria-hidden="true">${['早','午','晚','＋'][i]}</span><span class="daily-entry-copy"><strong>${x.name}</strong><span>${x.actual!==null?'NT$ '+money(x.actual):'點選記帳'}</span></span><span class="entry-status" aria-label="編輯金額">＋</span></button>`).join('');
  $('#daySpent').textContent='NT$ '+money(s.spent);
  $('#dayBudget').textContent=s.dailyMealBudget===null?'尚未設定三餐預算':s.dailyMealBudget===0?(s.mealSpent?'三餐未配置 · 已超支':'三餐未配置'): `當日三餐額度已用 ${s.ratio.toFixed(1)}%`;
@@ -130,7 +130,6 @@ for(const name of Object.keys(viewPanels)){
 }
 $('#dayEntries').onclick=e=>{const b=e.target.closest('[data-kind]');if(b)openDayEntry(selectedDate,b.dataset.kind);};
 $('#dayPrev').onclick=()=>changeDay(D.shift(selectedDate,-1));$('#dayNext').onclick=()=>changeDay(D.shift(selectedDate,1));$('#dayToday').onclick=()=>changeDay(L.iso(new Date()));
-$('#dayDate').onchange=e=>{if(e.target.value&&e.target.checkValidity())changeDay(e.target.value);};
 const dayWatcher=D.watchDay(date=>{changeDay(date);if(!$('#overview').hidden){selected=L.cycleKey(new Date(date+'T12:00:00'));render();}toast('新的一天，已翻到今天的記帳卡片。');});
 window.addEventListener('focus',()=>dayWatcher.check());document.addEventListener?.('visibilitychange',()=>{if(!document.hidden)dayWatcher.check();});
 render();

@@ -20,5 +20,10 @@ button,input,select{border-radius:2px}input,select{background:#fffdf7}.panel-tit
 .app-shell .daily-card.is-over-budget .day-badge{color:#8b241d;font-weight:700}
 .app-shell .daily-card.is-other-day .card-heading,.app-shell .daily-card.is-other-day .card-bottom{border-color:#aab0b5}
 .app-shell .daily-card.is-over-budget .card-heading,.app-shell .daily-card.is-over-budget .card-bottom{border-color:#c78176}
-.app-shell .daily-total{width:100%}.app-shell .daily-total #dayRemainingMeals,.app-shell .daily-total #dayRemainingTotal{font-size:.8125rem;color:inherit}
+.app-shell .daily-total{width:100%}
 @media(max-height:620px){.app-shell .daily-total>p{font-size:.75rem;line-height:1.3}.app-shell .daily-total strong{font-size:1.5rem;margin:2px 0}.app-shell .daily-total .budget-note{font-size:.6875rem}.app-shell .card-bottom{padding-top:6px}}
+
+.app-shell .daily-budget-details{text-align:left;color:var(--muted);font-size:.8125rem;line-height:1.5;margin-top:8px}
+.app-shell .daily-budget-details p,.app-shell .daily-budget-details .budget-note{font-size:inherit;line-height:inherit;font-weight:400;color:inherit;margin:0;overflow-wrap:anywhere}
+.app-shell .daily-budget-details p.negative{color:var(--red)}
+@media(max-height:620px){.app-shell .daily-budget-details{font-size:.75rem;line-height:1.3;margin-top:4px}}
