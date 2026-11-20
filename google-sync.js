@@ -1,6 +1,6 @@
 'use strict';
 let googleConnection=null,googleClient=null,googleAuto=false,googleBusy=false,googleTimer=null,googleSynced=null,googleUnsubscribe=null,googleEpoch=0;
-function googleText(s,error=false){$('#googleStatus').textContent=s;$('#googleMessage').textContent=s;$('#googleMessage').classList.toggle('error',error);}
+function googleText(s,error=false,phase=''){if(error&&googleMode&&!phase)phase='pending';syncText($('#googleStatus'),s,phase);syncText($('#googleMessage'),s,phase);if(googleMode)syncBadge(phase);$('#googleMessage').classList.toggle('error',error);}
 function googleControls(){
  $('#googleLogin').disabled=!googleConnection||googleBusy||googleMode;
  for(const id of ['googlePull','googlePush','googleMigrate','googleLogout'])$('#'+id).disabled=googleBusy||!googleMode;
@@ -10,7 +10,7 @@ function googleGuard(){if(googleBusy||cloudBusy||accountSwitching)throw Error('�
 function googleCache(){if(!googleMode||!googleClient)return;ledgerStorage.setItem(KEY+'-sync',JSON.stringify({revision:googleClient.revision??null,synced:googleSynced}));}
 function loadLedgerStorage(storage,key){const source=storage.getItem(key),next=source===null?L.initial():L.migrate(JSON.parse(source));ledgerStorage=storage;KEY=key;BACKUP=key+'-previous';raw=source;state=next;blocked=false;render();}
 function leaveGoogle(message='已登出 Google · 顯示原本的本機帳目'){
- googleEpoch++;clearTimeout(googleTimer);googleUnsubscribe?.();googleUnsubscribe=null;googleAuto=false;googleClient=null;googleSynced=null;googleMode=false;
+ googleEpoch++;clearTimeout(googleTimer);googleUnsubscribe?.();googleUnsubscribe=null;googleAuto=false;googleClient=null;googleSynced=null;googleMode=false;syncBadge();
  // Clear the authenticated ledger from the view, including any open edit/detail dialog.
  editing=null;for(const id of ['editor','dayDetails'])if($('#'+id).open)$('#'+id).close();$('#editBody').innerHTML='';$('#detailsBody').innerHTML='';
  try{loadLedgerStorage(localStorage,LOCAL_KEY);}catch{ledgerStorage=localStorage;KEY=LOCAL_KEY;BACKUP=KEY+'-previous';raw=localStorage.getItem(KEY);state=L.initial();blocked=true;render();}
@@ -40,10 +40,10 @@ async function loginGoogle(){
  }catch(e){googleText(GoogleLedger.message(e),true);}finally{googleBusy=false;accountSwitching=false;googleControls();}
 }
 function googleQueue(){
- if(!googleMode)return;googleCache();if(!googleAuto)return;clearTimeout(googleTimer);googleText('已存此分頁 · 等待同步 Google');googleTimer=setTimeout(flushGoogle,1200);googleTimer?.unref?.();
+ if(!googleMode)return;googleCache();if(!googleAuto){googleText('已存此分頁，請選擇上傳帳目。',false,'pending');return;}clearTimeout(googleTimer);googleText('已存此分頁 · 等待同步 Google',false,'pending');googleTimer=setTimeout(flushGoogle,1200);googleTimer?.unref?.();
 }
 async function flushGoogle(){
- if(!googleMode||!googleAuto||googleBusy)return;const client=googleClient,epoch=googleEpoch,snapshot=currentJSON();googleBusy=true;googleControls();googleText('已存此分頁 · 正在同步 Google Drive…');
+ if(!googleMode||!googleAuto||googleBusy)return;const client=googleClient,epoch=googleEpoch,snapshot=currentJSON();googleBusy=true;googleControls();googleText('已存此分頁 · 正在同步 Google Drive…',false,'syncing');
  try{await client.save(JSON.parse(snapshot));if(epoch!==googleEpoch||client!==googleClient)return;googleSynced=snapshot;googleCache();googleText('已同步至 Google Drive · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));}
  catch(e){if(epoch===googleEpoch){googleAuto=false;googleText('尚未同步 · '+GoogleLedger.message(e),true);}}
  finally{if(epoch===googleEpoch){googleBusy=false;googleControls();if(googleAuto&&currentJSON()!==googleSynced)googleQueue();}}

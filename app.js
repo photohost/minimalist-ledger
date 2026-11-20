@@ -10,6 +10,15 @@ const I=LedgerInsights;
 let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function syncText(element,message,phase=''){
+ if(!element)return;element.textContent=message;
+ if(!phase)return;
+ const label=phase==='syncing'?'雲端同步中':'尚未同步',detail=message.startsWith(label)?message.slice(label.length).replace(/^[\s·：:]+/,''):message;
+ element.innerHTML='<span class="sync-coin '+(phase==='syncing'?'is-syncing':'is-pending')+'" role="img" aria-label="'+label+'">'+Array.from(label).map((letter,index)=>'<span class="coin-letter" aria-hidden="true" style="--coin-index:'+index+'">'+letter+'</span>').join('')+'</span>'+(detail?'<span class="sync-detail"> · '+esc(detail)+'</span>':'');
+}
+function syncBadge(phase=''){
+ const badge=$('#syncBadge');if(!badge)return;badge.hidden=!phase;syncText(badge,phase==='syncing'?'雲端同步中':phase?'尚未同步':'',phase);
+}
 function toast(s){$('#notice').textContent=s;$('#notice').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').hidden=true,6000);toast.timer?.unref?.();}
 try{raw=ledgerStorage.getItem(KEY);if(raw!==null)state=L.migrate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
 function cycle(){return state.cycles[selected]||L.defaults();}
@@ -137,18 +146,18 @@ window.addEventListener('focus',()=>dayWatcher.check());document.addEventListene
 render();
 if(blocked)toast('無法讀取本機帳目，請到「設定」匯出原始資料或匯入有效備份。');
 
-function cloudText(message,error=false){$('#cloudStatus').textContent=message;$('#cloudMessage').textContent=message;$('#cloudStatus').classList.toggle('error',error);if(error)toast(message);}
+function cloudText(message,error=false,phase=''){if(error&&!phase)phase='pending';syncText($('#cloudStatus'),message,phase);syncText($('#cloudMessage'),message,phase);if(!googleMode)syncBadge(phase);$('#cloudStatus').classList.toggle('error',error);if(error)toast(message);}
 function cloudControls(){for(const id of ['cloudConnect','cloudPull','cloudPush','cloudDisconnect'])$('#'+id).disabled=cloudBusy;$('#cloudForm').hidden=!!cloudClient;$('#cloudActions').hidden=!cloudClient;}
 function currentJSON(){return JSON.stringify(state);}
 function queueCloud(){
  if(googleMode){googleQueue();return;}
- if(!cloudClient||!cloudAuto)return;
- clearTimeout(cloudTimer);cloudText('已存本機 · 等待上傳 GitHub');
+ if(!cloudClient||!cloudAuto){if(cloudClient)cloudText('已存本機，尚未啟用自動上傳。',false,'pending');else syncBadge('pending');return;}
+ clearTimeout(cloudTimer);cloudText('已存本機 · 等待上傳 GitHub',false,'pending');
  cloudTimer=setTimeout(flushCloud,1200);
 }
 async function flushCloud(){
  if(!cloudClient||!cloudAuto||cloudBusy)return;
- const snapshot=currentJSON();cloudBusy=true;cloudControls();cloudText('已存本機 · 正在上傳 GitHub…');
+ const snapshot=currentJSON();cloudBusy=true;cloudControls();cloudText('已存本機 · 正在上傳 GitHub…',false,'syncing');
  try{if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto)cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));}
  catch(e){cloudAuto=false;$('#cloudRetry').hidden=false;cloudText('僅存本機 · '+e.message,true);}
  finally{cloudBusy=false;cloudControls();if(cloudAuto&&currentJSON()!==cloudSynced)queueCloud();}
