@@ -59,7 +59,6 @@
   const d=c.days[date]||{meals:[item(),item(),item()],other:[]},rows=[];
   d.meals.forEach((x,i)=>{if(x.actual!==null)rows.push({name:mealNames[i],category:'三餐開銷',actual:x.actual});});
   d.other.forEach(x=>{if(x.actual!==null)rows.push({name:x.note||x.category,category:x.category,actual:x.actual});});
-  fixedRows(c).filter(x=>x.date===date&&x.actual!==null).forEach(x=>rows.push({name:x.name,category:'固定支出',actual:x.actual}));
   return rows;
  }
  const api={categories,mealNames,budgetKeys,clone,iso,cycleKey,dates,defaults,initial,item,day,stats,validate,validMoney,fixedRows,fixedTotal,migrate,breakdown};
