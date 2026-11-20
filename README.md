@@ -1,4 +1,4 @@
-# 日常留白 · 極簡個人記帳 v1.7.0
+# 日常留白 · 極簡個人記帳 v1.7.1
 
 手機優先的每日翻頁卡片，搭配五個書籤：記帳、總覽、分析、設定、關於。使用格子稿紙背景與 Adobe 思源宋體繁體中文台灣字型；網頁原始碼公開，實際帳目可儲存到私人 GitHub 倉庫。
 
@@ -69,7 +69,7 @@
 
 新版使用 Google 官方授權，將帳目版本直接存進個人 Drive 的「日常留白記帳」資料夾，主網站不使用 Firebase。只申請 drive.file 與基本帳號權限，Token 僅留記憶體。每次同步新增帳目版本，不覆寫舊檔；雙裝置同時更新時可選版並保留所有來源。
 
-需先啟用 Drive API 並設定網頁 OAuth Client ID，並完成真人授權才能驗證。完整設定、舊 Firebase 帳目匯出與限制：[GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md)。公開 ID 可貼入設定視窗，或填入 google-config.js。
+需先啟用 Drive API 並設定網頁 OAuth Client ID，並完成真人授權才能驗證。完整設定、舊 Firebase 帳目匯出與限制：[GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md)。OAuth 用戶端 ID 由網站管理者統一填入 google-config.js；訪客只需按 Google 登入，不建立專案、不填 ID。未設定時會顯示登入尚未開放，不假裝已可使用。
 
 舊 Firebase 功能移至 firebase-legacy.html，僅供明確登入取回帳目；主頁不載入其 SDK。原 Firebase 指南保留為歷史資料，請勿拿 Firebase 設定貼到新的 Drive 連線欄位。
 

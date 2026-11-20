@@ -2,7 +2,9 @@
 
 v1.7 使用 Google Identity Services 及 Google Drive API，主網站不載入 Firebase SDK，也不使用 Firestore。網站仍由 GitHub Pages 提供。
 
-## 你需要準備什麼
+此指南給網站管理者使用，訪客不需操作 Google Cloud。
+
+## 管理者需要準備什麼
 
 一個 Google Cloud 專案與「網頁應用程式」OAuth 用戶端 ID（結尾 `.apps.googleusercontent.com`）。這個 ID 是公開設定，不是用戶端密碼。可以使用原本 Firebase 專案對應的同一個 Google Cloud 專案，不需要另建 Firebase 或資料庫。
 
@@ -39,16 +41,9 @@ v1.7 使用 Google Identity Services 及 Google Drive API，主網站不載入 F
 
 若原本 Firebase 已建立 Web OAuth client，可以在同一專案檢視並使用該網頁用戶端 ID，但仍需加入本網站的 JavaScript 來源並啟用 Drive API。
 
-## 4. 網站連線
+## 4. 管理者設定網站一次
 
-1. 開啟 https://blog.harunoji.one/minimalist-ledger/?v=1.7.0 。
-2. 設定 → Google 帳號 → 首次連線設定。
-3. 貼上 OAuth 用戶端 ID，按「儲存連線設定」。
-4. 顯示就緒後，按「使用 Google 登入並連接 Drive」，選擇帳號並同意檔案權限。
-5. 第一次 Drive 尚無帳目，可按「匯入原本的本機／GitHub 帳目」，或建立新帳本後上傳。
-6. 看到「已同步至 Google Drive」才表示已儲存完成。
-
-如果要讓所有裝置都免填 ID，將公開 Client ID 填入 `google-config.js`：
+將上一步取得的公開 Client ID 提供給網站維護者，或自行填入 google-config.js 並部署：
 
 ```javascript
 window.LEDGER_GOOGLE_CONFIG = {
@@ -56,7 +51,20 @@ window.LEDGER_GOOGLE_CONFIG = {
 };
 ```
 
-網站不需要 API Key、Firebase 設定、服務帳戶或 Client secret。不應將任何密碼提交到公開倉庫。
+所有訪客共用這個網站用戶端 ID，各自登入 Google 帳號，帳目仍分別儲存在各自 Drive，不共用帳本。訪客不需要建立專案、設定 API 或貼入 ID。網站尚未設定 ID 時，登入會保持停用並顯示尚未開放。
+
+## 5. 對外公開
+
+1. Google Auth Platform → Audience / 目標對象，確認使用者類型為 External / 外部。
+2. 完成網站、隱私權政策與聯絡資料後，按 Publish app / 發布應用程式，將狀態改為 In production / 正式環境。
+3. 依主控台要求完成網域擁有權、品牌或其他必要驗證；發布與品牌驗證為不同步驟，不保證按發布後立刻完成所有驗證。
+4. 使用非測試名單的帳號驗證登入與 Drive 上傳。Google Workspace 管理者仍可能限制其成員授權第三方服務。
+
+官方參考：[目標對象與發布](https://support.google.com/cloud/answer/15549945)、[品牌驗證](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)。
+
+## 訪客的操作
+
+開啟網站 → 設定 → Google 帳號 → 使用 Google 登入 → 首次同意 Drive 檔案權限。之後在不同裝置登入同一帳號即可讀取自己的帳本。Google 要求的首次授權與到期重登仍需由使用者操作。
 
 ## 舊資料移轉
 

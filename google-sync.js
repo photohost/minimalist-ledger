@@ -1,10 +1,8 @@
 'use strict';
-const GOOGLE_CONFIG_KEY='minimalist-drive-oauth-config';
 let googleConnection=null,googleClient=null,googleAuto=false,googleBusy=false,googleTimer=null,googleSynced=null,googleUnsubscribe=null,googleEpoch=0;
 function googleText(s,error=false){$('#googleStatus').textContent=s;$('#googleMessage').textContent=s;$('#googleMessage').classList.toggle('error',error);}
 function googleControls(){
  $('#googleLogin').disabled=!googleConnection||googleBusy||googleMode;
- $('#googleSetup').disabled=googleBusy||googleMode;$('#googleConfig').disabled=googleBusy||googleMode;
  for(const id of ['googlePull','googlePush','googleMigrate','googleLogout'])$('#'+id).disabled=googleBusy||!googleMode;
  $('#googleActions').hidden=!googleMode;$('#cloudOpen').disabled=googleMode||googleBusy;
 }
@@ -19,12 +17,13 @@ function leaveGoogle(message='已登出 Google · 顯示原本的本機帳目'){
  $('#googleIdentity').textContent='';$('#googleConflictBox').hidden=true;$('#saveStatus').textContent='目前顯示未登入的本機帳目';googleBusy=false;accountSwitching=false;googleControls();googleText(message);
 }
 async function prepareGoogle(){
+ if(!window.LEDGER_GOOGLE_CONFIG){googleText("Google 登入尚未開放，目前可先使用本機記帳。");googleControls();return;}
  googleGuard();googleBusy=true;googleControls();googleText('正在準備 Google 登入…');
- try{const cfg=GoogleLedger.config($('#googleConfig').value);const connection=await GoogleLedger.connect(cfg);localStorage.setItem(GOOGLE_CONFIG_KEY,JSON.stringify(cfg));googleConnection=connection;googleText('連線設定已就緒，請按「使用 Google 登入」。');}
+ try{const cfg=GoogleLedger.config(window.LEDGER_GOOGLE_CONFIG);const connection=await GoogleLedger.connect(cfg);googleConnection=connection;googleText('選擇 Google 帳號，即可連接你的雲端帳本。');}
  catch(e){googleText(GoogleLedger.message(e),true);}finally{googleBusy=false;googleControls();}
 }
 async function loginGoogle(){
- try{googleGuard();if(!googleConnection)throw Error('請先儲存連線設定。');if(googleMode)throw Error('請先登出目前帳號。');
+ try{googleGuard();if(!googleConnection)throw Error('Google 登入尚未就緒，請稍候再試。');if(googleMode)throw Error('請先登出目前帳號。');
   // Call popup before any await so mobile browsers retain the user's gesture.
   const pending=googleConnection.signIn();googleBusy=true;accountSwitching=true;googleControls();googleText('等待 Google 登入…');const result=await pending,user=result.user,client=googleConnection.store(user);
   clearTimeout(cloudTimer);cloudAuto=false;cloudClient?.disconnect();cloudClient=null;cloudSynced=null;cloudControls();cloudText('已切換至 Google · GitHub 自動上傳已停止');
@@ -82,10 +81,10 @@ async function logoutGoogle(){
 }
 $('#googleOpen').onclick=()=>{
  $('#googleDialog').showModal();
- if(!googleMode&&!googleConnection){try{const cfg=window.LEDGER_GOOGLE_CONFIG||JSON.parse(localStorage.getItem(GOOGLE_CONFIG_KEY)||'null');if(cfg){$('#googleConfig').value=cfg.clientId;prepareGoogle().catch(e=>googleText(GoogleLedger.message(e),true));}}catch{googleText('連線設定無法讀取，請重新貼上 Google OAuth 用戶端 ID。',true);}}
+ if(!googleMode&&!googleConnection&&!googleBusy)prepareGoogle().catch(e=>googleText(GoogleLedger.message(e),true));
  googleControls();
 };
-$('#googleClose').onclick=()=>$('#googleDialog').close();$('#googleSetup').onclick=()=>prepareGoogle().catch(e=>googleText(GoogleLedger.message(e),true));$('#googleLogin').onclick=loginGoogle;
+$('#googleClose').onclick=()=>$('#googleDialog').close();$('#googleLogin').onclick=loginGoogle;
 $('#googlePull').onclick=()=>pullGoogle();$('#googlePush').onclick=()=>pushGoogle();$('#googleMigrate').onclick=()=>pushGoogle(true);$('#googleLogout').onclick=logoutGoogle;
 window.addEventListener('beforeunload',e=>{if(googleMode&&raw!==null&&currentJSON()!==googleSynced){e.preventDefault();e.returnValue='';}});
 window.addEventListener('focus',()=>{if(googleMode&&googleAuto&&!googleBusy&&!$('#editor').open&&currentJSON()===googleSynced)pullGoogle(false);});
@@ -93,3 +92,5 @@ googleControls();
 
 function showDriveConflicts(files){$('#googleConflictBox').hidden=false;$('#googleConflict').innerHTML=files.map(f=>'<option value="'+esc(f.id)+'">'+esc(f.modifiedTime?new Date(f.modifiedTime).toLocaleString('zh-TW'):f.name)+'</option>').join('');}
 $('#googleResolve').onclick=async()=>{if(googleBusy||!googleClient)return;if(!confirm('採用選定版本作為目前帳本？此分頁若有不同資料會先備份；其他 Drive 版本會保留。'))return;googleClient.preferredId=$('#googleConflict').value;await pullGoogle(true);if(googleMode&&googleAuto)await flushGoogle();};
+
+if(window.LEDGER_GOOGLE_CONFIG)prepareGoogle().catch(e=>googleText(GoogleLedger.message(e),true));else googleText('Google 登入尚未開放，目前可先使用本機記帳。');
