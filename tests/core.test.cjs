@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),L=require('../core.js');
 // Deliberately synthetic amounts; never place personal ledger data in tests.
-function fixture(){const c=L.defaults();c.income=1000;c.savingTarget=100;c.fixed.forEach((x,i)=>{x.budget=[100,20,10][i];});return c;}
+function fixture(){const c=L.defaults();delete c.budgets;c.income=1000;c.savingTarget=100;c.fixed.push({id:'legacy',name:'舊項目',category:'其他',budget:null,actual:null,done:false,date:null});c.fixed.forEach((x,i)=>{x.budget=[100,20,10][i];});return c;}
 test('5日至次月4日：跨年、閏年、4日與5日切換',()=>{
  assert.equal(L.cycleKey(new Date(2026,0,4)),'2025-12');assert.equal(L.cycleKey(new Date(2026,0,5)),'2026-01');
  assert.equal(L.dates('2024-02').length,29);assert.equal(L.dates('2025-02').length,28);

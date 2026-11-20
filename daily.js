@@ -4,7 +4,7 @@
  function shift(date,amount){const d=new Date(date+'T12:00:00');d.setDate(d.getDate()+amount);return L.iso(d);}
  function summary(c,date){
   const d=c.days[date]||{meals:[L.item(),L.item(),L.item()],other:[]};
-  const fixed=c.fixed.filter(x=>x.date===date),others=[...d.other,...fixed];
+  const fixed=L.fixedRows(c).filter(x=>x.date===date),others=[...d.other,...fixed];
   const entries=d.meals.map((x,i)=>({...x,name:L.mealNames[i],kind:String(i)}));
   entries.push({name:'其他',kind:'other',actual:others.some(x=>x.actual!==null)?others.reduce((n,x)=>n+(x.actual??0),0):null,budget:others.some(x=>x.budget!==null)?others.reduce((n,x)=>n+(x.budget??0),0):null,done:others.length>0&&others.every(x=>x.done)});
   const spent=Math.round(entries.reduce((n,x)=>n+(x.actual??0),0)*100)/100;

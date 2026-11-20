@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),D=require('../daily.js'),L=require('../core.js');
-function fixture(){const c=L.defaults();c.fixed.forEach(x=>x.budget=0);return c;}
+function fixture(){const c=L.defaults();delete c.budgets;c.fixed.forEach(x=>x.budget=0);return c;}
 test('翻頁跨月、跨年與閏年正確',()=>{assert.equal(D.shift('2026-11-30',1),'2026-12-01');assert.equal(D.shift('2026-12-31',1),'2027-01-01');assert.equal(D.shift('2024-03-01',-1),'2024-02-29');});
 test('當日花費僅加總當日，比例使用整期花費與預算',()=>{const c=fixture(),d=L.day(c,'2026-11-19');d.meals[0]={budget:100,actual:50,done:true};d.other=[{category:'飲料',note:'測試',budget:100,actual:20,done:true}];L.day(c,'2026-11-18').meals[0]={budget:100,actual:30,done:true};const s=D.summary(c,'2026-11-19');assert.equal(s.entries.length,4);assert.equal(s.spent,70);assert.equal(s.cycleSpent,100);assert.equal(s.cycleBudget,300);assert.ok(Math.abs(s.ratio-100/3)<1e-8);});
 test('固定支出只有指定付款日計入當日花費，不重複計算本期',()=>{const c=fixture();Object.assign(c.fixed[0],{budget:100,actual:100,date:'2026-11-19',done:true});assert.equal(D.summary(c,'2026-11-19').spent,100);assert.equal(D.summary(c,'2026-11-20').spent,0);assert.equal(D.summary(c,'2026-11-19').cycleSpent,100);});

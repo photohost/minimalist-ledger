@@ -5,15 +5,16 @@ let state=L.initial(), raw=null, blocked=false, selected=L.cycleKey(), editing=n
 let selectedDate=L.iso(new Date()),editingCycle=selected;
 let currentView='daily';
 const D=DailyLedger;
+const I=LedgerInsights;
 let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(s){$('#notice').textContent=s;$('#notice').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').hidden=true,6000);toast.timer?.unref?.();}
-try{raw=localStorage.getItem(KEY);if(raw!==null)state=L.validate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
+try{raw=localStorage.getItem(KEY);if(raw!==null)state=L.migrate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
 function cycle(){return state.cycles[selected]||L.defaults();}
 function commit(candidate,fromCloud=false){
  if(blocked)throw Error('目前儲存不可用，請先匯出原始資料並匯入有效備份。');
- L.validate(candidate);
+ candidate=L.migrate(candidate);
  if(localStorage.getItem(KEY)!==raw)throw Error('另一個分頁已更新資料。請先重新整理，再輸入本次變更。');
  const next=JSON.stringify(candidate);
  if(raw!==null)localStorage.setItem(BACKUP,raw);
@@ -28,17 +29,35 @@ function render(){
  $('#periodTitle').textContent=`${selected.slice(0,4)} 年 ${Number(selected.slice(5))} 月`;
  $('#periodRange').textContent=ds[0].replaceAll('-','.')+' — '+ds.at(-1).replaceAll('-','.');
  $('#settingsPeriod').textContent=`${selected.slice(0,4)} 年 ${Number(selected.slice(5))} 月 · ${ds[0].slice(5).replace('-','/')} 至 ${ds.at(-1).slice(5).replace('-','/')}`;
- const cards=[['本期預算',s.budget,'收入 NT$'+money(c.income)],['已花費',s.spent,'依實際金額累計'],['可用餘額',s.available,'收入 − 已花費（未扣預留）'],['本期預計可存',s.projected,'目標 NT$'+money(c.savingTarget)],['儲蓄目標差額',s.projected-c.savingTarget,s.unknown?'預算尚未填齊，估計可能偏高':'預計可存 − 月儲蓄目標']];
+ const cards=[['支出預算',c.budgets&&['meals','other','fixed'].every(k=>c.budgets[k]===null)?null:s.budget,'三餐＋其他＋固定支出'],['已花費',s.spent,'依實際金額累計'],['可用餘額',s.available,c.income===null?'請先設定本期收入':'收入 − 已花費'],['本期預計可存',s.projected,s.unknown?'預算未完整，估計可能偏高':'收入 − 預估支出'],['儲蓄預算',s.savingTarget,'獨立預留，不計入消費']];
  $('#metrics').innerHTML=cards.map(([label,n,note])=>`<div class="metric"><p class="muted">${label}</p><strong class="${n<0?'negative':''}">${money(n)}</strong><small>${note}</small></div>`).join('');
  $('#goalProgress').value=state.savings??0;$('#goalProgress').setAttribute('aria-label','目前已存金額，目標二十萬元');
  $('#goalText').textContent=state.savings===null?'目前存款待設定 · 尚無實際進度':`已存 NT$${money(state.savings)} · ${(state.savings/200000*100).toFixed(1)}%`;
- $('#goalNote').textContent=state.savings===null?'設定目前存款後，即可查看預計期末總額。':`預計期末存款 NT$${money(state.savings+s.projected)}（目前存款＋本期預計可存）`;
- let html='';const offset=new Date(ds[0]+'T12:00:00').getDay();for(let i=0;i<offset;i++)html+='<div class="day blank" aria-hidden="true"></div>';
- for(const date of ds){const d=c.days[date]||{meals:[L.item(),L.item(),L.item()],other:[]},f=c.fixed.filter(x=>x.date===date);const entries=d.meals.map((x,i)=>({name:L.mealNames[i],kind:String(i),actual:x.actual,done:x.done,budget:x.budget}));
- const others=[...d.other,...f];entries.push({name:'其他',kind:'other',actual:others.some(x=>x.actual!==null)?others.reduce((a,x)=>a+(x.actual??0),0):null,done:others.length>0&&others.every(x=>x.done),budget:others.some(x=>x.budget!==null)?others.reduce((a,x)=>a+(x.budget??0),0):null});
- html+=`<article class="day ${date===L.iso(new Date())?'today':''}"><div class="day-head"><strong><span class="mobile-date">${Number(date.slice(5,7))} 月 </span>${Number(date.slice(8))}<span class="mobile-date"> 日 · ${'日一二三四五六'[new Date(date+'T12:00:00').getDay()]}</span></strong><small>${date===L.iso(new Date())?'今天':date.endsWith('-05')?'本期開始':date===ds.at(-1)?'本期結束':''}</small></div><div class="day-entries">${entries.map(x=>`<button class="entry ${x.done?'done':''}" data-date="${date}" data-kind="${x.kind}" aria-label="${date} ${x.name}，實際 ${x.actual===null?'未填':money(x.actual)}"><span>${x.done?'✓':'○'} ${x.name}</span><span class="amount">${x.actual!==null?money(x.actual):x.budget!==null?'預 '+money(x.budget):'＋'}</span></button>`).join('')}</div></article>`;
- }$('#calendar').innerHTML=html;
- $('#fixed').innerHTML=c.fixed.map(x=>`<button class="fixed-card" data-fixed="${esc(x.id)}"><strong>${x.done?'✓':'○'} ${esc(x.name)}</strong><span>預算 NT$${money(x.budget)}　實際 ${x.actual===null?'未填':'NT$'+money(x.actual)}</span><span>${x.date?'付款日 '+x.date:'尚未指定付款日'}</span></button>`).join('');
+ $('#goalNote').textContent=state.savings===null||s.projected===null?'設定目前存款與本期收入後，可查看預計期末總額。':`預計期末存款 NT$${money(state.savings+s.projected)}（目前存款＋本期預計可存）`;
+ const monthDays=I.monthDates(selected);let html='';for(let n=0;n<new Date(monthDays[0]+'T12:00:00').getDay();n++)html+='<span class="calendar-empty" aria-hidden="true"></span>';
+ for(const date of monthDays){const key=L.cycleKey(new Date(date+'T12:00:00')),dc=state.cycles[key]||L.defaults(),rows=L.breakdown(dc,date),spent=rows.reduce((n,x)=>n+x.actual,0);const amount=spent>=10000?new Intl.NumberFormat('zh-TW',{notation:'compact',maximumFractionDigits:1}).format(spent):money(spent);html+=`<button class="calendar-day ${date===L.iso(new Date())?'today':''} ${key!==selected?'previous-cycle':''}" data-day="${date}" aria-label="${date}，${rows.length?'花費 '+money(spent)+' 元':'尚無紀錄'}"><span>${Number(date.slice(8))}</span><small>${rows.length?esc(amount):'—'}</small></button>`;}$('#calendar').innerHTML=html;
+ $('#fixed').innerHTML=c.fixed.map(x=>{const t=L.fixedTotal(x);return `<button class="fixed-card" data-fixed="${esc(x.id)}"><strong>${x.name}</strong><span>${x.id==='subscription'?t.count+' 筆訂閱 · ':''}每期金額 ${t.budget===null?'未設定':'NT$'+money(t.budget)}　實際 ${t.actual===null?'未填':'NT$'+money(t.actual)}</span></button>`;}).join('');
+ $('#budgetSummary').textContent=c.budgets?`支出預算 NT$${money(s.budget)} · 儲蓄 NT$${money(s.savingTarget)} · ${s.unknown?'尚有預算未設定':'配置合計 NT$'+money(s.allocation)}`:'目前沿用舊明細預算，請設定四類預算。';
+ $('#settingsMonth').value=selected;$('#analysisMonth').value=selected;renderAnalysis(c);
+ $('#legacyRecords').innerHTML=c.undatedOther?.length?`<details><summary>舊支出（未指定日期）</summary><p class="muted">以下保留於「其他」統計，不自行指定日期或畫入每日趨勢。</p><ul class="expense-list">${c.undatedOther.map(x=>`<li><div>${esc(x.note)}<small>預算 ${money(x.budget)}</small></div><span>實際 ${money(x.actual)}</span></li>`).join('')}</ul></details>`:'';
+}
+function openDateDetails(date){
+ const key=L.cycleKey(new Date(date+'T12:00:00')),c=state.cycles[key]||L.defaults(),rows=L.breakdown(c,date),sum=rows.reduce((n,x)=>n+x.actual,0);
+ $('#detailsTitle').textContent=date.replaceAll('-',' / ');$('#detailsBody').innerHTML=rows.length?`<ul class="expense-list">${rows.map(x=>`<li><div><strong>${esc(x.name)}</strong><small>${esc(x.category)}</small></div><span>NT$ ${money(x.actual)}</span></li>`).join('')}</ul>`:'<p class="empty-state">這一天尚無實際支出紀錄。</p>';
+ $('#detailsTotal').textContent='當日總花費 NT$ '+money(sum);$('#detailsEdit').onclick=()=>{$('#dayDetails').close();selectedDate=date;setView('daily');};$('#dayDetails').showModal();
+}
+$('#detailsClose').onclick=()=>$('#dayDetails').close();
+function renderAnalysis(c){
+ const a=I.analyze(c,selected),s=a.stats,colors=['#a15e4b','#81917b','#676f7d'],names=['三餐開銷','其他','固定支出'],keys=['meals','other','fixed'],circ=2*Math.PI*52;let offset=0;
+ const rings=keys.map((key,i)=>{const value=s.buckets[key].spent,length=s.spent?value/s.spent*circ:0;const html=`<circle cx="80" cy="80" r="52" fill="none" stroke="${colors[i]}" stroke-width="18" stroke-dasharray="${length} ${circ-length}" stroke-dashoffset="${-offset}" transform="rotate(-90 80 80)"><title>${names[i]}：${money(value)} 元</title></circle>`;offset+=length;return html;}).join('');
+ $('#spendingChart').innerHTML=`<svg viewBox="0 0 160 160" role="img" aria-label="本期支出分布：${keys.map((k,i)=>names[i]+money(s.buckets[k].spent)+'元').join('、')}"><circle cx="80" cy="80" r="52" fill="none" stroke="#e5ded2" stroke-width="18"/>${rings}<text x="80" y="75" text-anchor="middle" font-size="12">${s.spent?'本期支出':'尚無支出'}</text><text x="80" y="99" text-anchor="middle" font-size="18">${money(s.spent)}</text></svg><ul class="chart-legend">${keys.map((k,i)=>`<li><span class="color-key" style="background:${colors[i]}"></span><span>${names[i]}</span><strong>NT$ ${money(s.buckets[k].spent)}</strong><small>${s.spent?(s.buckets[k].spent/s.spent*100).toFixed(1):'0'}%</small></li>`).join('')}</ul>`;
+ $('#budgetChart').innerHTML=keys.map((k,i)=>{const b=s.buckets[k],ratio=b.budget>0?b.spent/b.budget*100:null;return `<div class="budget-bar-row"><div><span>${names[i]}</span><small>${money(b.spent)} / ${money(b.budget)}</small></div><div class="budget-track"><span style="width:${ratio===null?0:Math.min(100,ratio)}%;background:${ratio>100?'#ad493d':colors[i]}"></span></div><p class="${ratio>100?'negative':'muted'}">${b.budget===null?'預算未設定':b.budget===0?(b.spent?'無配置，已有花費':'未配置'):ratio.toFixed(1)+'%'+(ratio>100?' · 已超支':'')}</p></div>`;}).join('')+`<div class="saving-plan"><span>儲蓄預算 NT$ ${money(s.savingTarget)}</span><p class="muted">本期預計可存 NT$ ${money(s.projected)}；為估計值，不代表已實際存入。</p></div>`;
+ const max=Math.max(...a.daily.map(x=>x.cumulative),1),points=a.daily.map((x,i)=>`${20+i*280/(a.daily.length-1)},${124-x.cumulative/max*100}`).join(' ');
+ $('#trendChart').innerHTML=`<svg viewBox="0 0 320 160" role="img" aria-label="已指定日期的累計支出趨勢，合計 ${money(a.daily.at(-1).cumulative)} 元"><path d="M20 24V124H300" fill="none" stroke="#b9ad9d"/><polyline points="${points}" fill="none" stroke="#a15e4b" stroke-width="2.5"/><text x="20" y="148" font-size="12">${a.daily[0].date.slice(5).replace('-','/')}</text><text x="300" y="148" text-anchor="end" font-size="12">${a.daily.at(-1).date.slice(5).replace('-','/')}</text><text x="20" y="16" font-size="12">NT$ ${money(a.daily.at(-1).cumulative)}</text></svg><p class="muted">未記錄日期暫按 0 加總。${a.undated?'另有 NT$ '+money(a.undated)+' 支出未指定日期，未畫入趨勢線。':''}</p>`;
+ $('#categoryTable').innerHTML=a.categories.length?`<table><caption>其他支出分類</caption><thead><tr><th>分類</th><th>實際金額</th></tr></thead><tbody>${a.categories.map(x=>`<tr><td>${esc(x.name)}</td><td>NT$ ${money(x.spent)}</td></tr>`).join('')}</tbody></table>`:'<p class="empty-state">尚無「其他」分類消費，記帳後即時更新。</p>';
+ $('#analysisNote').textContent=`${selected} · ${s.unknown?'預算尚未設定完整；':''}僅統計實際輸入的消費，不含儲蓄。`;
+ $('#budgetSummary').classList.toggle('negative',c.income!==null&&s.allocation>c.income);
+ if(c.income!==null&&s.allocation>c.income)$('#budgetSummary').textContent+=' · 配置超過收入 NT$'+money(s.allocation-c.income);
 }
 function show(title,body,onSave){editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
 function num(label,id,value,required=false){return `<label>${label}<input type="number" inputmode="decimal" min="0" max="1000000000" step="0.01" id="${id}" value="${value??''}" ${required?'required':''} placeholder="未知，留空"></label>`;}
@@ -55,14 +74,23 @@ function editOther(date){const c=cycle(),rows=c.days[date]?.other||[];show(date+
  $('#rows').onclick=e=>{if(e.target.classList.contains('remove'))e.target.closest('.detail-row').remove();};
  $('#editBody').querySelectorAll('[data-link]').forEach(b=>b.onclick=()=>{if(saveEditor()){editFixed(b.dataset.link,date);}});
 }
-function editFixed(id,date){const x=cycle().fixed.find(x=>x.id===id),ds=L.dates(selected);show(x.name+' · 固定支出',`<p class="hint">這筆支出整期只計算一次。可先填部分實際金額，付清後勾選完成。</p><div class="fields">${num('預算','fb',x.budget)}${num('實際金額（累計）','fa',x.actual)}</div><label>付款日（可留空）<input type="date" id="fdate" min="${ds[0]}" max="${ds.at(-1)}" value="${date||x.date||''}"></label>${checkbox('fd',x.done)}`,c=>{const y=c.fixed.find(y=>y.id===id);Object.assign(y,readItem('f'),{date:$('#fdate').value||null});});}
-function editSettings(){const c=cycle();show('本期設定',`<p class="hint">只變更 ${selected} 這一期；其他週期保留各自設定。新週期使用已知預設值，餐費與未知費用留空。</p><div class="fields">${num('實領收入','income',c.income,true)}${num('月儲蓄目標','target',c.savingTarget,true)}</div><p class="hint">房租、訂閱、加油的預算與實際金額，請到下方固定支出編輯。水電等未知支出可於每日「其他」新增。</p>`,draft=>{draft.income=read('income',true);draft.savingTarget=read('target',true);});}
+function editFixed(id,date){if(id==='subscription')return editSubscriptions(date);const x=cycle().fixed.find(x=>x.id===id),ds=L.dates(selected);show(x.name+' · 固定支出',`<p class="hint">整期只計算一次；實際金額為累計付款。此筆明細預算不會與「固定支出」分類預算重複相加。</p><div class="fields">${num('每期金額（預算）','fb',x.budget)}${num('實際金額（累計）','fa',x.actual)}</div><label>付款日（可留空）<input type="date" id="fdate" min="${ds[0]}" max="${ds.at(-1)}" value="${date||x.date||''}"></label>${checkbox('fd',x.done)}`,c=>{const y=c.fixed.find(y=>y.id===id);Object.assign(y,readItem('f'),{date:$('#fdate').value||null});});}
+function editSettings(){const c=cycle(),s=L.stats({...c,key:selected}),b=c.budgets||{meals:s.buckets.meals.planned,other:s.buckets.other.planned,fixed:s.buckets.fixed.planned,savings:c.savingTarget};show('預算設定',`<p class="hint">${selected} 這一期，所有預算由你自行設定。留空表示未知，0 表示不配置。儲蓄與消費分開，明細金額不再重複加進分類預算。</p>${num('本期實領收入','income',c.income)}<div class="fields">${num('三餐開銷','bmeals',b.meals)}${num('其他','bother',b.other)}${num('固定支出','bfixed',b.fixed)}${num('儲蓄','bsavings',b.savings)}</div><p class="hint">配置合計＝三類支出預算＋儲蓄；超過收入仍可儲存，系統會提醒。新月份一律留空。</p>`,draft=>{draft.income=read('income');draft.budgets={meals:read('bmeals'),other:read('bother'),fixed:read('bfixed'),savings:read('bsavings')};draft.savingTarget=draft.budgets.savings;});}
+function subscriptionRow(x,date){const ds=L.dates(selected);return `<div class="subscription-row" data-id="${esc(x?.id||'sub-'+Date.now()+'-'+Math.random().toString(36).slice(2))}"><div class="row-top"><label>訂閱內容<input class="sub-name" maxlength="80" value="${esc(x?.name||'')}" placeholder="例如：音樂服務"></label><button type="button" class="sub-remove">移除</button></div><div class="fields"><label>每期金額（預算）<input class="sub-budget" type="number" min="0" max="1000000000" step="0.01" value="${x?.budget??''}" inputmode="decimal"></label><label>實際付款（累計）<input class="sub-actual" type="number" min="0" max="1000000000" step="0.01" value="${x?.actual??''}" inputmode="decimal"></label></div><label>付款日期<input class="sub-date" type="date" min="${ds[0]}" max="${ds.at(-1)}" value="${x?.date||date||''}"></label><label class="check"><input class="sub-done" type="checkbox" ${x?.done?'checked':''}>本期已付清</label></div>`;}
+function editSubscriptions(date){
+ const sub=cycle().fixed.find(x=>x.id==='subscription');show('訂閱明細',`<p class="hint">自行新增訂閱名稱與每期金額。填「每期金額」只代表預算；付款後再填實際金額。每筆只計一次。</p><div id="subscriptions">${(sub.items||[]).map(x=>subscriptionRow(x)).join('')}</div><button type="button" id="addSubscription">新增訂閱</button>`,c=>{
+  const list=[];for(const row of $('#subscriptions').children){const amount=sel=>{const value=row.querySelector(sel).value,n=value===''?null:Number(value);if(!L.validMoney(n))throw Error('訂閱金額不正確。');return n;};const x={id:row.dataset.id,name:row.querySelector('.sub-name').value.trim(),budget:amount('.sub-budget'),actual:amount('.sub-actual'),date:row.querySelector('.sub-date').value||null,done:row.querySelector('.sub-done').checked};if(!x.name)throw Error('請填寫每筆訂閱內容，或移除空白列。');if(x.done&&x.actual===null)throw Error('已付清訂閱必須填寫實際金額。');list.push(x);}const x=c.fixed.find(x=>x.id==='subscription');Object.assign(x,{budget:null,actual:null,done:false,date:null,items:list});
+ });
+ $('#addSubscription').onclick=()=>$('#subscriptions').insertAdjacentHTML('beforeend',subscriptionRow(null,date));
+ $('#subscriptions').onclick=e=>{if(e.target.classList.contains('sub-remove')){const row=e.target.closest('.subscription-row');if(row.querySelector('.sub-actual').value!==''&&!confirm('移除後，本期統計會扣掉這筆訂閱的付款金額。確定移除？'))return;row.remove();}};
+}
 function saveEditor(){try{const candidate=L.clone(state);candidate.cycles[editingCycle]??=L.defaults();editing(candidate.cycles[editingCycle],candidate);commit(candidate);$('#editor').close();render();return true;}catch(e){$('#editError').textContent=e.message||'儲存失敗，請匯出備份後重試。';return false;}}
 $('#editForm').onsubmit=e=>{e.preventDefault();saveEditor();};$('#close').onclick=$('#cancel').onclick=()=>$('#editor').close();
-$('#calendar').onclick=e=>{const b=e.target.closest('[data-date]');if(b){selectedDate=b.dataset.date;setView('daily');openDayEntry(b.dataset.date,b.dataset.kind);}};
+$('#calendar').onclick=e=>{const b=e.target.closest('[data-day]');if(b)openDateDetails(b.dataset.day);};
 $('#fixed').onclick=e=>{const b=e.target.closest('[data-fixed]');if(b)editFixed(b.dataset.fixed);};
 function move(delta){const [y,m]=selected.split('-').map(Number),d=new Date(y,m-1+delta,5),key=L.cycleKey(d);if(+key.slice(0,4)<1900||+key.slice(0,4)>2200)return;selected=key;render();}
 $('#prev').onclick=()=>move(-1);$('#next').onclick=()=>move(1);$('#today').onclick=()=>{selected=L.cycleKey();render();};$('#month').min='1900-01';$('#month').max='2200-12';$('#month').onchange=e=>{if(e.target.checkValidity()&&e.target.value){selected=e.target.value;render();}};
+for(const id of ['settingsMonth','analysisMonth']){$('#'+id).min='1900-01';$('#'+id).max='2200-12';$('#'+id).onchange=e=>{if(e.target.checkValidity()&&e.target.value){selected=e.target.value;render();}};}
 $('#settings').onclick=editSettings;$('#goalEdit').onclick=()=>show('更新目前存款',`${num('目前已存金額（所有週期共用）','savings',state.savings)}<p class="hint">請填入你目前已存下的金額；本工具不會將月結餘自動加入存款。期末估計＝此金額＋所選本期預計可存，請於期初更新基準，避免重複加上已存入的金額。未知時留空。</p>`,(c,s)=>{s.savings=read('savings');});
 $('#export').onclick=()=>download(blocked?(raw||JSON.stringify(state)):JSON.stringify(state,null,2),`minimalist-${L.iso(new Date())}${blocked?'-recovery':''}.json`);
 $('#import').onclick=()=>$('#file').click();$('#file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>10*1024*1024)throw Error('備份上限為 10 MB。');const candidate=L.validate(JSON.parse(await file.text()));if(!confirm(`備份包含 ${Object.keys(candidate.cycles).length} 個週期。匯入會取代所有目前帳目；系統會先下載目前資料備份。確定匯入？`))return;
@@ -83,10 +111,10 @@ function renderDaily(){
 }
 function openDayEntry(date,kind){selected=L.cycleKey(new Date(date+'T12:00:00'));kind==='other'?editOther(date):editMeal(date,Number(kind));}
 function changeDay(date,animate=true){if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<'1900-01-01'||date>'2200-12-31')return;selectedDate=date;renderDaily();if(animate&&typeof matchMedia==='function'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)$('#dailyCard').animate?.([{opacity:.35,transform:'translateY(8px)'},{opacity:1,transform:'translateY(0)'}],{duration:180});}
-const viewPanels={daily:'dailyView',overview:'overview',settings:'settingsView',about:'aboutView'};
+const viewPanels={daily:'dailyView',overview:'overview',analysis:'analysisView',settings:'settingsView',about:'aboutView'};
 function setView(view){
  if(!Object.hasOwn(viewPanels,view))return;
- if(currentView==='daily'&&(view==='overview'||view==='settings'))selected=L.cycleKey(new Date(selectedDate+'T12:00:00'));
+ if(currentView==='daily'&&['overview','analysis','settings'].includes(view))selected=L.cycleKey(new Date(selectedDate+'T12:00:00'));
  currentView=view;
  for(const [name,id] of Object.entries(viewPanels)){const active=name===view;$('#'+id).hidden=!active;$('#tab-'+name).setAttribute('aria-selected',String(active));$('#tab-'+name).tabIndex=active?0:-1;}
  render();
