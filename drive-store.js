@@ -11,7 +11,24 @@
   disconnect(){this.token='';}
   async request(path,{method='GET',body,headers={},text=false}={}){
    this.check();let r;try{r=await this.fetchImpl(path.startsWith('https://')?path:API+path,{method,body,headers:{Authorization:'Bearer '+this.token,...headers},credentials:'omit',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)});}catch{throw Error('無法連線 Google Drive。資料仍留在此分頁，請稍後重試。');}
-   this.check();if(!r.ok){if(r.status===401)throw Error('Google 授權已到期或撤銷。請匯出備份後重新登入。');if(r.status===403)throw Error('Google Drive 無法存取。請確認已啟用 Drive API、同意檔案權限，且 Drive 尚有可用空間。');if(r.status===404)throw Error('Drive 帳目檔案已移除或無存取權，請重新讀取雲端。');throw Error('Google Drive 操作失敗（'+r.status+'），未同步內容仍留在此分頁。');}
+   this.check();if(!r.ok){
+    let details={};try{details=await r.json();}catch{}
+    const error=details?.error||{},reasons=[...(Array.isArray(error.errors)?error.errors.map(x=>x.reason):[]),...(Array.isArray(error.details)?error.details.map(x=>x.reason):[]),error.status].filter(x=>typeof x==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(x));
+    const mappings=[
+     [['accessNotConfigured','SERVICE_DISABLED','API_DISABLED'],'網站專案尚未啟用 Google Drive API。請管理者在 Google Cloud 專案 '+this.projectId.split('-')[0]+' 啟用 Drive API，稍候再按「讀取雲端帳目」。'],
+     [['insufficientPermissions','ACCESS_TOKEN_SCOPE_INSUFFICIENT'],'Google 授權未包含 Drive 檔案權限。請先匯出備份，再登出並重新登入，同意儲存帳目的檔案權限。'],
+     [['storageQuotaExceeded'],'你的 Google Drive 儲存空間已滿，請釋出空間後重試。'],
+     [['rateLimitExceeded','userRateLimitExceeded','dailyLimitExceeded','RATE_LIMIT_EXCEEDED'],'Google Drive 請求達到用量限制，請稍後再試；持續發生時請管理者檢查 API 配額。'],
+     [['domainPolicy','DOMAIN_POLICY','adminPolicyEnforced'],'此帳號的機構管理政策禁止 Drive 存取，請聯絡 Google Workspace 管理者。'],
+     [['insufficientFilePermissions','appNotAuthorizedToFile'],'目前帳號沒有此 Drive 檔案的存取權。請確認登入正確帳號，並由原本建立帳目的網站讀取。']
+    ];
+    let info=mappings.find(([codes])=>codes.some(c=>reasons.includes(c)))?.[1];
+    if(r.status===401)info='Google 授權已到期或撤銷。請匯出備份後重新登入。';
+    if(r.status===404)info='Drive 帳目檔案已移除或無存取權，請重新讀取雲端。';
+    if(r.status===429&&!info)info='Google Drive 請求過於頻繁，請稍後重試。';
+    const code=reasons[0]||'HTTP_'+r.status;
+    const failure=Error((info||'Google Drive 拒絕此操作，請將以下代碼提供給網站管理者。')+'（'+r.status+' / '+code+'）目前帳目仍留在此分頁。');failure.code=code;failure.status=r.status;throw failure;
+   }
    return text?await r.text():await r.json();
   }
   async list(query){let files=[],pageToken='';do{const p=new URLSearchParams({q:query,spaces:'drive',pageSize:'1000',fields:'nextPageToken,files(id,name,modifiedTime,appProperties)',...(pageToken?{pageToken}:{})});const r=await this.request('files?'+p);if(!Array.isArray(r.files))throw Error('Drive 檔案清單格式錯誤。');files.push(...r.files);pageToken=r.nextPageToken||'';if(files.length>20000)throw Error('帳目版本過多，請先匯出備份並整理 Drive 資料夾。');}while(pageToken);return files;}
