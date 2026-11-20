@@ -1,3 +1,5 @@
+> 此為舊 Firebase 版指南。新版請參考 [Google Drive 設定](GOOGLE_DRIVE_SETUP.md)。只需取回舊資料時，使用 [Firebase 舊版匯出頁](https://blog.harunoji.one/minimalist-ledger/firebase-legacy.html)。
+
 # Google 登入與雲端記帳設定
 
 此版本已包含網站端功能；尚未替你建立或連接 Firebase 專案。完成下列設定後，才可測試真實 Google 登入與雲端同步。現有 GitHub 帳目不會自動搬移。
@@ -31,7 +33,7 @@
 
 ## 4. 在網站連線，取得你的 UID
 
-1. 開啟 https://blog.harunoji.one/minimalist-ledger/?v=1.6.0 。
+1. 開啟 https://blog.harunoji.one/minimalist-ledger/firebase-legacy.html 。
 2. 設定 → Google 帳號 → 展開「首次連線設定」。
 3. 貼上第 1 步的網頁設定（JSON 或 `const firebaseConfig = { ... };`），按「儲存連線設定」。
 4. 顯示就緒後，按「使用 Google 登入」，選擇自己的帳號。

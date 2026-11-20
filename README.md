@@ -1,4 +1,4 @@
-# 日常留白 · 極簡個人記帳 v1.6.0
+# 日常留白 · 極簡個人記帳 v1.7.0
 
 手機優先的每日翻頁卡片，搭配五個書籤：記帳、總覽、分析、設定、關於。使用格子稿紙背景與 Adobe 思源宋體繁體中文台灣字型；網頁原始碼公開，實際帳目可儲存到私人 GitHub 倉庫。
 
@@ -65,11 +65,13 @@
 
 請不要在新舊程式分頁同時修改同一帳目。部署新版後關閉舊頁，重新開啟並視需要重新連線 GitHub。
 
-## Google 登入試用版
+## Google 登入與 Google Drive
 
-設定 → Google 帳號，支援 Google 登入、個人帳目、雲端同步、明確匯入原有帳本、版本衝突保護與登出隔離。需先建立 Firebase 專案、啟用 Google 登入及發布只允許本人 UID 的規則；網站部署不等於 Firebase 已連接。
+新版使用 Google 官方授權，將帳目版本直接存進個人 Drive 的「日常留白記帳」資料夾，主網站不使用 Firebase。只申請 drive.file 與基本帳號權限，Token 僅留記憶體。每次同步新增帳目版本，不覆寫舊檔；雙裝置同時更新時可選版並保留所有來源。
 
-完整步驟與限制：[FIREBASE_SETUP.md](FIREBASE_SETUP.md)。公開網頁設定可在網站貼入，或填入 firebase-config.js。登入後停止 GitHub 自動同步，使用獨立的分頁工作階段暫存。未同步內容關閉分頁可能遺失；離線後請保留備份並手動重試。
+需先啟用 Drive API 並設定網頁 OAuth Client ID，並完成真人授權才能驗證。完整設定、舊 Firebase 帳目匯出與限制：[GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md)。公開 ID 可貼入設定視窗，或填入 google-config.js。
+
+舊 Firebase 功能移至 firebase-legacy.html，僅供明確登入取回帳目；主頁不載入其 SDK。原 Firebase 指南保留為歷史資料，請勿拿 Firebase 設定貼到新的 Drive 連線欄位。
 
 ## 啟用 GitHub 儲存
 
