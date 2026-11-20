@@ -1,4 +1,5 @@
 'use strict';
+const GOOGLE_SAVE_DELAY_MS=200;
 let googleConnection=null,googleClient=null,googleAuto=false,googleBusy=false,googleTimer=null,googleSynced=null,googleUnsubscribe=null,googleEpoch=0,googleLegacyBackup=null;
 function googleText(s,error=false,phase=''){if(error&&googleMode&&!phase)phase='pending';syncText($('#googleStatus'),s,phase);syncText($('#googleMessage'),s,phase);if(googleMode)syncBadge(phase);$('#googleMessage').classList.toggle('error',error);}
 function googleControls(){
@@ -72,7 +73,7 @@ function googleQueue(){
  clearTimeout(googleTimer);
  if(window.navigator?.onLine===false){googleText('目前離線，帳目已存本機，連線後會再同步。',false,'pending');return;}
  googleText('已存本機 · 等待同步 Google Drive',false,'pending');
- googleTimer=setTimeout(resumePendingGoogle,1200);googleTimer?.unref?.();
+ googleTimer=setTimeout(resumePendingGoogle,GOOGLE_SAVE_DELAY_MS);googleTimer?.unref?.();
 }
 async function resumePendingGoogle(){if(googleMode&&googleDirty())await resumeGoogle();}
 async function resumeGoogle(){
@@ -91,7 +92,7 @@ async function flushGoogle(){
  googleBusy=true;googleControls();googleText('已存本機 · 正在同步 Google Drive…',false,'syncing');
  try{
   checkGoogleLocal();
-  await client.save(JSON.parse(snapshot));
+  await client.save(JSON.parse(snapshot),{baseText:googleSynced});
   if(epoch!==googleEpoch||client!==googleClient)return;
   checkGoogleLocal();
   googleSynced=snapshot;googleCache();
@@ -134,7 +135,7 @@ async function pullGoogle(ask=true){
  }catch(e){if(epoch===googleEpoch)googleText(GoogleLedger.message(e),true);}
  finally{if(epoch===googleEpoch){
   googleBusy=false;googleControls();
-  if(changedWhileReading){clearTimeout(googleTimer);googleTimer=setTimeout(resumePendingGoogle,1200);googleTimer?.unref?.();}
+  if(changedWhileReading){clearTimeout(googleTimer);googleTimer=setTimeout(resumePendingGoogle,GOOGLE_SAVE_DELAY_MS);googleTimer?.unref?.();}
  }}
  if(startUpload&&epoch===googleEpoch)await flushGoogle();
 }

@@ -6,7 +6,7 @@
  function payload(data){const text=JSON.stringify(L.migrate(data));if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('帳目上限為 800 KB，請先匯出備份。');return text;}
  function message(e){return e?.message||'Google Drive 操作未完成，請稍後重試。';}
  class DriveStore{
-  constructor({token,user,clientId,expiresAt=0,fetchImpl=root.fetch,now=Date.now}){this.token=token;this.user=user;this.uid=user.uid;this.projectId=clientId;this.expiresAt=expiresAt;this.now=now;this.fetchImpl=fetchImpl.bind(root);this.revision=undefined;this.busy=false;this.folderId=null;this.pending=null;this.preferredId=null;}
+  constructor({token,user,clientId,expiresAt=0,fetchImpl=root.fetch,now=Date.now}){this.token=token;this.user=user;this.uid=user.uid;this.projectId=clientId;this.expiresAt=expiresAt;this.now=now;this.fetchImpl=fetchImpl.bind(root);this.revision=undefined;this.busy=false;this.folderId=null;this.pending=null;this.preferredId=null;this.acceptedContent=null;this.availableIds=[];}
   check(){if(!this.token||(this.expiresAt&&this.now()>=this.expiresAt))throw Error('Google 授權已到期。請重新登入同一帳號繼續同步；目前帳目仍留在此瀏覽器。');}
   disconnect(){this.token='';}
   async request(path,{method='GET',body,headers={},text=false}={}){
@@ -31,36 +31,94 @@
    }
    return text?await r.text():await r.json();
   }
-  async list(query){let files=[],pageToken='';do{const p=new URLSearchParams({q:query,spaces:'drive',pageSize:'1000',fields:'nextPageToken,files(id,name,modifiedTime,appProperties)',...(pageToken?{pageToken}:{})});const r=await this.request('files?'+p);if(!Array.isArray(r.files))throw Error('Drive 檔案清單格式錯誤。');files.push(...r.files);pageToken=r.nextPageToken||'';if(files.length>20000)throw Error('帳目版本過多，請先匯出備份並整理 Drive 資料夾。');}while(pageToken);return files;}
-  async read(){
+  async list(query){let files=[],pageToken='';do{const p=new URLSearchParams({q:query,spaces:'drive',pageSize:'1000',fields:'nextPageToken,files(id,name,modifiedTime,appProperties,headRevisionId)',...(pageToken?{pageToken}:{})});const r=await this.request('files?'+p);if(!Array.isArray(r.files))throw Error('Drive 檔案清單格式錯誤。');files.push(...r.files);pageToken=r.nextPageToken||'';if(files.length>20000)throw Error('帳目版本過多，請先匯出備份並整理 Drive 資料夾。');}while(pageToken);return files;}
+  async history(){
    const files=await this.list("trashed = false and appProperties has { key='ledger' and value='minimalist-v1' }");
    const parentsById=new Map(files.map(file=>[file.id,Object.entries(file.appProperties||{}).filter(([key])=>/^p\d+$/.test(key)).map(([,id])=>id)]));
    const parentIds=new Set([...parentsById.values()].flat());
    const heads=files.filter(file=>!parentIds.has(file.id)).sort((a,b)=>a.id.localeCompare(b.id));
-   const revision=heads.map(file=>file.id).join(',');
-   if(!heads.length){if(files.length)throw Error('Drive 帳目版本關係異常，請先保留本機帳目。');return {revision:'',data:null};}
-   const chosen=heads.length===1?heads[0]:heads.find(file=>file.id===this.preferredId);
-   if(!chosen)return {revision,data:null,conflicts:heads};
+   if(!heads.length&&files.length)throw Error('Drive 帳目版本關係異常，請先保留本機帳目。');
    const reachable=new Set(),remaining=heads.map(file=>file.id);
    while(remaining.length){const id=remaining.pop();if(reachable.has(id))continue;reachable.add(id);remaining.push(...(parentsById.get(id)||[]));}
    const extendsLocal=!this.revision||this.revision.split(',').every(id=>reachable.has(id));
-   const text=await this.request('files/'+encodeURIComponent(chosen.id)+'?alt=media',{text:true});
-   if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('Drive 帳目超過大小上限，未覆寫資料。');
-   let data;try{data=L.migrate(JSON.parse(text));}catch{throw Error('Drive 帳目格式錯誤，未覆寫目前帳目。');}
-   return {revision,data,heads:heads.map(file=>file.id),extendsLocal};
+   return {heads,revision:heads.map(file=>file.id).join(','),extendsLocal};
   }
-  accept(remote){if(remote.conflicts)throw Error('請先選擇衝突版本。');this.revision=remote.revision;this.pending=null;}
+  async read(history){
+   const {heads,revision,extendsLocal}=history??await this.history();
+   if(!heads.length)return {revision,data:null};
+   const file=heads.length===1?heads[0]:heads.find(head=>head.id===this.preferredId);
+   if(!file)return {revision,data:null,conflicts:heads};
+   const text=await this.request('files/'+encodeURIComponent(file.id)+'?alt=media',{text:true});
+   if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('Drive 帳目超過大小上限，未覆寫資料。');
+   let data;
+   try{data=L.migrate(JSON.parse(text));}catch{throw Error('Drive 帳目格式錯誤，未覆寫目前帳目。');}
+   return {revision,data,file,extendsLocal};
+  }
+  accept(remote){
+   if(remote.conflicts)throw Error('請先選擇衝突版本。');
+   this.revision=remote.revision;
+   this.acceptedContent=remote.file?{id:remote.file.id,headRevisionId:remote.file.headRevisionId,text:JSON.stringify(remote.data)}:null;
+   this.pending=null;
+  }
   async folder(){if(this.folderId)return this.folderId;const folders=await this.list("trashed = false and mimeType = 'application/vnd.google-apps.folder' and appProperties has { key='ledgerFolder' and value='minimalist-v1' }");if(folders.length)this.folderId=folders[0].id;else{const f=await this.request('files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'日常留白記帳',mimeType:'application/vnd.google-apps.folder',appProperties:{ledgerFolder:'minimalist-v1'}})});this.folderId=f.id;}return this.folderId;}
-  async save(data){
-   this.check();if(this.busy)throw Error('上一筆 Drive 儲存尚未完成。');if(this.revision===undefined)throw Error('請先選擇要使用的帳目版本。');const text=payload(data);this.busy=true;
-   try{const remote=await this.read();if(remote.conflicts)throw Error('Drive 有多個同時編輯的版本，請先讀取雲端並選擇版本。');if(remote.data&&payload(remote.data)===text&&remote.extendsLocal&&!remote.revision.includes(',')){this.revision=remote.revision;this.pending=null;return;}if(remote.revision!==this.revision)throw Error('另一裝置已更新帳目。請匯出此瀏覽器備份，再讀取雲端或確認取代。');const parents=remote.revision?remote.revision.split(','):[];if(parents.length>24)throw Error('衝突版本過多，請先備份並整理 Drive。');
-    const folderId=await this.folder();if(!this.pending||this.pending.text!==text||this.pending.base!==this.revision){const ids=await this.request('files/generateIds?count=1&space=drive');if(!ids.ids?.[0])throw Error('Drive 無法建立檔案 ID。');this.pending={id:ids.ids[0],text,base:this.revision};}
-    const id=this.pending.id,metadata={id,name:'日常留白-'+new Date(this.now()).toISOString().replace(/[:.]/g,'-')+'.json',mimeType:'application/json',parents:[folderId],appProperties:{ledger:'minimalist-v1',...Object.fromEntries(parents.map((p,i)=>['p'+i,p]))}},boundary='ledger_upload_boundary',body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(metadata)+'\r\n--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+text+'\r\n--'+boundary+'--';
-    // Append an immutable version: concurrent writers cannot destroy one another's data.
-    await this.request('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body});
-    this.preferredId=null;const latest=await this.read();if(latest.conflicts||latest.revision!==id)throw Error('Drive 已保留上傳版本，但偵測到其他裝置同時更新。請讀取雲端並選擇版本。');this.revision=id;this.pending=null;
+  async nextId(){
+   if(!this.availableIds.length){
+    const result=await this.request('files/generateIds?count=8&space=drive');
+    this.availableIds=Array.isArray(result.ids)?result.ids:[];
+   }
+   const id=this.availableIds.shift();
+   if(!id)throw Error('Drive 無法建立檔案 ID。');
+   return id;
+  }
+  async save(data,{baseText}={}){
+   this.check();
+   if(this.busy)throw Error('上一筆 Drive 儲存尚未完成。');
+   if(this.revision===undefined)throw Error('請先選擇要使用的帳目版本。');
+   const text=payload(data);
+   this.busy=true;
+   try{
+    const history=await this.history();
+    const {heads,revision}=history;
+    const selected=heads.length===1?heads[0]:heads.find(file=>file.id===this.preferredId);
+    if(heads.length&&!selected)throw Error('Drive 有多個同時編輯的版本，請先讀取雲端並選擇版本。');
+    const known=this.acceptedContent;
+    const expectedText=known?.text??baseText;
+    const unchanged=selected?.headRevisionId&&revision===this.revision&&selected.id===known?.id&&selected.headRevisionId===known.headRevisionId;
+    let remoteText;
+    if(unchanged)remoteText=known.text;
+    else if(selected){
+     const remote=await this.read(history);
+     remoteText=JSON.stringify(remote.data);
+     if(remoteText===text&&history.extendsLocal&&heads.length===1){this.accept(remote);return;}
+    }
+    if(revision!==this.revision||(selected&&typeof expectedText==='string'&&remoteText!==expectedText))throw Error('另一裝置已更新帳目。請匯出本機備份，再讀取雲端或確認取代。');
+    if(unchanged&&heads.length===1&&remoteText===text)return;
+    const parents=heads.map(file=>file.id);
+    if(parents.length>24)throw Error('衝突版本過多，請先備份並整理 Drive。');
+    const folderId=await this.folder();
+    if(!this.pending||this.pending.text!==text||this.pending.base!==revision){
+     this.pending={id:await this.nextId(),text,base:revision};
+    }
+    const {id}=this.pending;
+    const metadata={id,name:'日常留白-'+new Date(this.now()).toISOString().replace(/[:.]/g,'-')+'.json',mimeType:'application/json',parents:[folderId],appProperties:{ledger:'minimalist-v1',...Object.fromEntries(parents.map((parent,i)=>['p'+i,parent]))}};
+    const boundary='ledger_upload_boundary';
+    const body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(metadata)+'\r\n--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+text+'\r\n--'+boundary+'--';
+    // Keep both versions if two devices upload against the same parent.
+    const uploaded=await this.request('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,headRevisionId',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body});
+    if(uploaded.id!==id)throw Error('無法確認 Drive 回傳的檔案，帳目仍保存在本機。');
+    this.preferredId=null;
+    const latest=await this.history();
+    if(latest.revision===revision)throw Error('Drive 已收到上傳，版本清單尚未更新。請稍後重試。');
+    if(latest.revision!==id)throw Error('Drive 已保留上傳版本，但偵測到其他裝置同時更新。請讀取雲端並選擇版本。');
+    const file=latest.heads[0];
+    if(!file.headRevisionId||file.headRevisionId!==uploaded.headRevisionId){
+     const remote=await this.read(latest);
+     if(JSON.stringify(remote.data)!==text)throw Error('Drive 上傳後的帳目已有變更，本機版本仍保留。');
+    }
+    this.accept({revision:id,data:JSON.parse(text),file});
    }finally{this.busy=false;}
   }
+
  }
  let sdkPromise;
  function loadSDK(){if(root.google?.accounts?.oauth2)return Promise.resolve(root.google);if(!sdkPromise)sdkPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;const timer=setTimeout(()=>{script.remove();sdkPromise=null;reject(Error('Google 登入元件載入逾時，請確認網路再重試。'));},20000);script.onload=()=>{clearTimeout(timer);resolve(root.google)};script.onerror=()=>{clearTimeout(timer);sdkPromise=null;reject(Error('Google 登入元件無法載入，請確認網路與內容封鎖設定。'));};document.head.append(script);});return sdkPromise;}
