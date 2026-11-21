@@ -51,3 +51,52 @@ test('同一 Drive 檔案的內容版本改變時，拒絕自動上傳覆蓋',as
  await assert.rejects(reopened.save(next,{baseText:G.payload(base)}),/另一裝置已更新/);
  assert.equal((await reopened.read()).data.savings,90);
 });
+test('到期重新連線用同一帳號，並保留同一個 Drive 帳本及版本',async()=>{
+ let oauth,options,uid='account-a',clock=100;
+ const g={accounts:{oauth2:{initTokenClient:x=>{oauth=x;return {requestAccessToken:x=>{options=x}}},hasGrantedAllScopes:()=>true}}};
+ const c=await G.connect(CID,{load:async()=>g,now:()=>clock,fetchImpl:async()=>Response.json({sub:uid,email:'a@example.test',email_verified:true})});
+ const first=c.signIn();
+ await oauth.callback({access_token:'first',expires_in:10});
+ const {user}=await first;
+ const ledger=c.store(user);
+ ledger.accept({revision:'known-revision'});
+ clock=20000;
+ assert.equal(ledger.expired(),true);
+ const bad=c.signIn({uid:user.uid});
+ assert.deepEqual(options,{login_hint:'account-a',prompt:''});
+ uid='account-b';
+ await oauth.callback({access_token:'wrong',expires_in:10});
+ await assert.rejects(bad,/目前帳本的 Google 帳號/);
+ assert.equal(ledger.token,'first');
+ uid=user.uid;
+ const renewal=c.signIn({uid:user.uid});
+ await oauth.callback({access_token:'fresh',expires_in:3600});
+ await renewal;
+ assert.equal(c.store(user),ledger);
+ assert.equal(ledger.revision,'known-revision');
+ assert.equal(ledger.token,'fresh');
+});
+
+test('長效登入在重開後恢復，Drive 拒絕短效權杖時續期後重試',async()=>{
+ const requests=[];
+ const user={uid:'account-a',email:'a@example.test'};
+ const c=await G.connect({clientId:CID,keepSignedIn:true},{
+  load:async()=>{throw Error('should not load Google popup')},now:()=>100,
+  fetchImpl:async(url,options)=>{
+   requests.push([url,options]);
+   if(url.endsWith('/session'))return Response.json({user,accessToken:'initial',expiresAt:100000});
+   if(url.endsWith('/refresh'))return Response.json({user,accessToken:'renewed',expiresAt:100000});
+   if(url.endsWith('/logout'))return Response.json({});
+   if(options.headers.Authorization==='Bearer initial')return new Response(null,{status:401});
+   assert.equal(options.headers.Authorization,'Bearer renewed');
+   return Response.json({files:[]});
+  }
+ });
+ assert.deepEqual(await c.restore(),{user});
+ const store=c.store(user);
+ assert.deepEqual(await store.read(),{revision:'',data:null});
+ assert.deepEqual(requests.map(([url])=>url.startsWith('/')?url.split('/').at(-1):'drive'),['session','drive','refresh','drive']);
+ await c.signOut();
+ assert.equal(store.token,'');
+ await assert.rejects(store.read(),/重新連線/);
+});

@@ -1,9 +1,12 @@
 'use strict';
 const GOOGLE_SAVE_DELAY_MS=200;
-let googleConnection=null,googleClient=null,googleAuto=false,googleBusy=false,googleTimer=null,googleSynced=null,googleUnsubscribe=null,googleEpoch=0,googleLegacyBackup=null;
+let googleConnection=null,googleClient=null,googleAuto=false,googleBusy=false,googleTimer=null,googleSynced=null,googleUnsubscribe=null,googleEpoch=0,googleLegacyBackup=null,googleNeedsSignIn=false;
 function googleText(s,error=false,phase=''){if(error&&googleMode&&!phase)phase='pending';syncText($('#googleStatus'),s,phase);syncText($('#googleMessage'),s,phase);if(googleMode)syncBadge(phase);$('#googleMessage').classList.toggle('error',error);}
 function googleControls(){
- $('#googleLogin').disabled=!googleConnection||googleBusy||googleMode;
+ const reconnect=googleMode&&(googleNeedsSignIn||(!googleConnection?.restore&&googleClient?.expired?.()));
+ $('#googleLogin').textContent=reconnect?'重新連線 Google':'使用 Google 登入';
+ $('#googleLogin').hidden=googleMode&&!reconnect;
+ $('#googleLogin').disabled=!googleConnection||googleBusy;
  for(const id of ['googlePull','googlePush','googleMigrate','googleLogout'])$('#'+id).disabled=googleBusy||!googleMode;
  $('#googleRecover').disabled=googleBusy;
  $('#googleActions').hidden=!googleMode;$('#cloudOpen').disabled=googleMode||googleBusy;
@@ -43,19 +46,27 @@ function leaveGoogle(message='已登出 Google · 顯示原本的本機帳目'){
  // Clear the authenticated ledger from the view, including any open edit/detail dialog.
  editing=null;for(const id of ['editor','dayDetails'])if($('#'+id).open)$('#'+id).close();$('#editBody').innerHTML='';$('#detailsBody').innerHTML='';
  try{loadLedgerStorage(localStorage,LOCAL_KEY);}catch{ledgerStorage=localStorage;KEY=LOCAL_KEY;BACKUP=KEY+'-previous';raw=localStorage.getItem(KEY);state=L.initial();blocked=true;render();}
- googleLegacyBackup=null;$('#googleRecover').hidden=true;$('#googleIdentity').textContent='';$('#googleConflictBox').hidden=true;$('#saveStatus').textContent='目前顯示未登入的本機帳目';googleBusy=false;accountSwitching=false;googleControls();googleText(message);
+ googleLegacyBackup=null;googleNeedsSignIn=false;$('#googleRecover').hidden=true;$('#googleIdentity').textContent='';$('#googleConflictBox').hidden=true;$('#saveStatus').textContent='目前顯示未登入的本機帳目';googleBusy=false;accountSwitching=false;googleControls();googleText(message);
 }
 async function prepareGoogle(){
  if(!window.LEDGER_GOOGLE_CONFIG){googleText("Google 登入尚未開放，目前可先使用本機記帳。");googleControls();return;}
  googleGuard();googleBusy=true;googleControls();googleText('正在準備 Google 登入…');
- try{const cfg=GoogleLedger.config(window.LEDGER_GOOGLE_CONFIG);const connection=await GoogleLedger.connect(cfg);googleConnection=connection;googleText('選擇 Google 帳號，即可連接你的雲端帳本。');}
- catch(e){googleText(GoogleLedger.message(e),true);}finally{googleBusy=false;googleControls();}
+ try{
+  const cfg=GoogleLedger.config(window.LEDGER_GOOGLE_CONFIG);
+  const connection=await GoogleLedger.connect(cfg);
+  googleConnection=connection;
+  if(connection.restore)accountSwitching=true;
+  const restored=await connection.restore?.();
+  if(restored){activateGoogle(restored.user,connection.store(restored.user));await resumeGoogle();return;}
+  const loginFailed=window.location?.hash==='#google-login-error';
+  if(loginFailed)window.history.replaceState(null,'',window.location.pathname+window.location.search);
+  googleText(loginFailed?'Google 授權未完成，請再登入一次。':'選擇 Google 帳號，即可連接你的雲端帳本。',loginFailed);
+ }
+ catch(e){googleText(GoogleLedger.message(e),true);}finally{googleBusy=false;accountSwitching=false;googleControls();}
 }
-async function loginGoogle(){
- try{googleGuard();if(!googleConnection)throw Error('Google 登入尚未就緒，請稍候再試。');if(googleMode)throw Error('請先登出目前帳號。');
-  // Call popup before any await so mobile browsers retain the user's gesture.
-  const pending=googleConnection.signIn();googleBusy=true;accountSwitching=true;googleControls();googleText('等待 Google 登入…');const result=await pending,user=result.user,client=googleConnection.store(user);
+function activateGoogle(user,client){
   clearTimeout(cloudTimer);cloudAuto=false;cloudClient?.disconnect();cloudClient=null;cloudSynced=null;cloudControls();cloudText('已切換至 Google · GitHub 自動上傳已停止');
+  googleNeedsSignIn=false;
   googleEpoch++;googleClient=client;googleMode=true;googleAuto=false;googleSynced=null;
   const key=LOCAL_KEY+'-drive-'+client.projectId+'-'+encodeURIComponent(user.uid);
   try{loadGoogleLedger(key);}
@@ -65,8 +76,26 @@ async function loginGoogle(){
   $('#saveStatus').textContent=blocked?'無法讀取本機帳目，可先匯出備份。':'Google 帳目保存在此瀏覽器';
   googleUnsubscribe=googleConnection.observe(next=>{if(next?.uid!==client.uid&&googleClient===client)leaveGoogle('Google 登入已失效 · 已關閉帳號資料，請重新登入');});
   googleBusy=false;accountSwitching=false;googleControls();
+}
+async function loginGoogle(){
+ try{
+  googleGuard();
+  if(!googleConnection)throw Error('Google 登入尚未就緒，請稍候再試。');
+  const reconnect=googleMode;
+  const pending=googleConnection.signIn(reconnect?{uid:googleClient.uid}:undefined);
+  googleBusy=true;accountSwitching=true;googleControls();googleText('等待 Google 授權…');
+  const result=await pending;
+  if(result.redirecting)return;
+  const {user}=result;
+  if(reconnect){
+   googleNeedsSignIn=false;googleBusy=false;accountSwitching=false;googleControls();
+  }else activateGoogle(user,googleConnection.store(user));
   await resumeGoogle();
- }catch(e){googleText(GoogleLedger.message(e),true);}finally{googleBusy=false;accountSwitching=false;googleControls();}
+ }catch(e){googleAuthError(e);}finally{googleBusy=false;accountSwitching=false;googleControls();}
+}
+function googleAuthError(error){
+ if(error.code==='sign_in_required')googleNeedsSignIn=true;
+ googleText(GoogleLedger.message(error),true);
 }
 function googleQueue(){
  if(!googleMode||!googleDirty())return;
@@ -97,7 +126,7 @@ async function flushGoogle(){
   checkGoogleLocal();
   googleSynced=snapshot;googleCache();
   if(!googleDirty())googleText('已同步至 Google Drive · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));
- }catch(e){if(epoch===googleEpoch){googleAuto=false;googleText(GoogleLedger.message(e),true);}}
+ }catch(e){if(epoch===googleEpoch){googleAuto=false;googleAuthError(e);}}
  finally{if(epoch===googleEpoch){googleBusy=false;googleControls();if(googleAuto&&googleDirty())googleQueue();}}
 }
 async function pullGoogle(ask=true){
@@ -132,7 +161,7 @@ async function pullGoogle(ask=true){
    client.accept(remote);googleSynced=currentJSON();googleAuto=true;googleCache();
    googleText('已同步至 Google Drive · 後續儲存會自動上傳');
   }
- }catch(e){if(epoch===googleEpoch)googleText(GoogleLedger.message(e),true);}
+ }catch(e){if(epoch===googleEpoch)googleAuthError(e);}
  finally{if(epoch===googleEpoch){
   googleBusy=false;googleControls();
   if(changedWhileReading){clearTimeout(googleTimer);googleTimer=setTimeout(resumePendingGoogle,GOOGLE_SAVE_DELAY_MS);googleTimer?.unref?.();}
@@ -148,7 +177,7 @@ async function pushGoogle(migrate=false){
   if(remote.data&&JSON.stringify(remote.data)!==JSON.stringify(data)){if(!confirm('Google 已有不同帳目。確認以選定帳目取代？會先下載被取代的雲端備份。'))return;download(JSON.stringify(remote.data,null,2),`minimalist-google-before-replace-${Date.now()}.json`);}
   if(migrate&&raw!==null&&currentJSON()!==JSON.stringify(data))download(raw,`minimalist-before-migration-${Date.now()}.json`);
   accountSwitching=false;if(migrate){commit(data,true);render();}client.accept(remote);googleSynced=remote.data?JSON.stringify(remote.data):null;googleCache();googleAuto=true;
- }catch(e){googleText(GoogleLedger.message(e),true);}finally{if(epoch===googleEpoch){accountSwitching=false;googleBusy=false;googleControls();}}
+ }catch(e){googleAuthError(e);}finally{if(epoch===googleEpoch){accountSwitching=false;googleBusy=false;googleControls();}}
  if(epoch===googleEpoch&&googleAuto)await flushGoogle();
 }
 async function logoutGoogle(){
