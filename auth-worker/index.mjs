@@ -72,9 +72,14 @@ async function exchange(env,params) {
     body:new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,client_secret:env.GOOGLE_CLIENT_SECRET,...params})
   });
   const data=await response.json();
-  if(!response.ok){const error=Error('Google token request failed');error.invalidGrant=data.error==='invalid_grant';throw error;}
+  if(!response.ok){
+    const error=Error('Google token request failed');
+    error.invalidGrant=data.error==='invalid_grant';
+    if(data.error==='invalid_client'||data.error==='unauthorized_client')error.stage='client';
+    else if(error.invalidGrant)error.stage='code';
+    throw error;
+  }
   if(typeof data.access_token!=='string'||!data.access_token||!Number.isFinite(Number(data.expires_in))||Number(data.expires_in)<=0)throw Error('Google returned an invalid token');
-  if(data.scope&&!data.scope.split(/\s+/).includes(DRIVE_SCOPE))throw Error('Google Drive authorization is missing');
   return data;
 }
 
@@ -94,21 +99,31 @@ async function begin(key,env,origin) {
 async function callback(request,url,key,env,origin) {
   const home=origin+'/minimalist-ledger/';
   const clearFlow=cookie(FLOW_COOKIE,'',0);
+  const fail=stage=>redirect(home+'#google-login-error='+stage,[clearFlow]);
   const flow=await unseal(request,FLOW_COOKIE,key);
+  if(!flow||url.searchParams.get('state')!==flow.state)return fail('state');
+  if(url.searchParams.get('error')==='access_denied')return fail('consent');
   const code=url.searchParams.get('code');
-  if(!flow||url.searchParams.get('state')!==flow.state||!code)return redirect(home+'#google-login-error',[clearFlow]);
+  if(!code)return fail('code');
+  let tokens;
   try{
-    const tokens=await exchange(env,{grant_type:'authorization_code',code,code_verifier:flow.verifier,redirect_uri:origin+PATH+'/callback'});
-    if(typeof tokens.refresh_token!=='string'||!tokens.refresh_token||!tokens.scope?.split(/\s+/).includes(DRIVE_SCOPE))throw Error('Google did not grant offline Drive access');
+    tokens=await exchange(env,{grant_type:'authorization_code',code,code_verifier:flow.verifier,redirect_uri:origin+PATH+'/callback'});
+  }catch(error){return fail(error.stage||'exchange');}
+  if(!tokens.scope?.split(/\s+/).includes(DRIVE_SCOPE))return fail('drive');
+  if(typeof tokens.refresh_token!=='string'||!tokens.refresh_token)return fail('offline');
+  let profile;
+  try{
     const response=await fetch(PROFILE_URL,{headers:{Authorization:'Bearer '+tokens.access_token},redirect:'error',signal:AbortSignal.timeout(12000)});
-    if(!response.ok)throw Error('Google profile request failed');
-    const profile=await response.json();
-    if(typeof profile.sub!=='string'||!profile.sub||typeof profile.email!=='string'||!profile.email||profile.email_verified!==true)throw Error('Google identity could not be verified');
-    const seconds=Number(tokens.refresh_token_expires_in);
-    const ttl=seconds>0?Math.min(SESSION_SECONDS,Math.floor(seconds)):SESSION_SECONDS;
-    const session={user:{uid:profile.sub,email:profile.email},refreshToken:tokens.refresh_token,...accessDetails(tokens),expiresAt:Date.now()+ttl*1000};
-    return redirect(home,[clearFlow,cookie(SESSION_COOKIE,await seal(SESSION_COOKIE,session,key),ttl)]);
-  }catch{return redirect(home+'#google-login-error',[clearFlow]);}
+    if(!response.ok)return fail('profile');
+    profile=await response.json();
+    if(typeof profile.sub!=='string'||!profile.sub||typeof profile.email!=='string'||!profile.email||profile.email_verified!==true)return fail('profile');
+  }catch{return fail('profile');}
+  const seconds=Number(tokens.refresh_token_expires_in);
+  const ttl=seconds>0?Math.min(SESSION_SECONDS,Math.floor(seconds)):SESSION_SECONDS;
+  const session={user:{uid:profile.sub,email:profile.email},refreshToken:tokens.refresh_token,...accessDetails(tokens),expiresAt:Date.now()+ttl*1000};
+  try{
+    return redirect(home+'#google-login-complete',[clearFlow,cookie(SESSION_COOKIE,await seal(SESSION_COOKIE,session,key),ttl)]);
+  }catch{return fail('session');}
 }
 
 async function session(request,key,env,force) {
@@ -118,6 +133,7 @@ async function session(request,key,env,force) {
   if(force||active.accessExpiresAt<=Date.now()+60000){
     try{
       const tokens=await exchange(env,{grant_type:'refresh_token',refresh_token:active.refreshToken});
+      if(tokens.scope&&!tokens.scope.split(/\s+/).includes(DRIVE_SCOPE))return json({error:'sign_in_required'},401,[cookie(SESSION_COOKIE,'',0)]);
       Object.assign(active,accessDetails(tokens));
       if(tokens.refresh_token)active.refreshToken=tokens.refresh_token;
       const remaining=Math.floor((active.expiresAt-Date.now())/1000);

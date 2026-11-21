@@ -1,5 +1,16 @@
 'use strict';
 const GOOGLE_SAVE_DELAY_MS=200;
+const GOOGLE_LOGIN_ISSUES={
+ state:'登入流程已逾時或瀏覽器沒有保留登入 Cookie。請在同一分頁重試，或使用一般登入。',
+ consent:'Google 授權已取消。若要同步，請同意網站使用 Google Drive。',
+ client:'Google 拒絕長效登入服務的用戶端憑證。請先使用一般登入。',
+ code:'Google 的登入憑證已逾時或用過，請從網站重新開始登入。',
+ drive:'Google Drive 權限尚未同意。請再登入一次並勾選 Drive 權限。',
+ offline:'Google 沒有授予長效登入權限。你可重試授權或先使用一般登入。',
+ profile:'Google 帳號驗證未完成。請重試，或先使用一般登入。',
+ exchange:'長效登入服務暫時無法完成 Google 授權。請先使用一般登入。',
+ session:'瀏覽器未能保留長效登入。請重試，或先使用一般登入。'
+};
 let googleConnection=null,googleClient=null,googleAuto=false,googleBusy=false,googleTimer=null,googleSynced=null,googleUnsubscribe=null,googleEpoch=0,googleLegacyBackup=null,googleNeedsSignIn=false;
 function googleText(s,error=false,phase=''){if(error&&googleMode&&!phase)phase='pending';syncText($('#googleStatus'),s,phase);syncText($('#googleMessage'),s,phase);if(googleMode)syncBadge(phase);$('#googleMessage').classList.toggle('error',error);}
 function googleControls(){
@@ -7,6 +18,8 @@ function googleControls(){
  $('#googleLogin').textContent=reconnect?'重新連線 Google':'使用 Google 登入';
  $('#googleLogin').hidden=googleMode&&!reconnect;
  $('#googleLogin').disabled=!googleConnection||googleBusy;
+ const popupLink=$('#googlePopupLogin');
+ if(popupLink)popupLink.hidden=googleMode||!(googleConnection?.cfg?.keepSignedIn||window.LEDGER_GOOGLE_CONFIG?.keepSignedIn&&!popupLoginRequested());
  for(const id of ['googlePull','googlePush','googleMigrate','googleLogout'])$('#'+id).disabled=googleBusy||!googleMode;
  $('#googleRecover').disabled=googleBusy;
  $('#googleActions').hidden=!googleMode;$('#cloudOpen').disabled=googleMode||googleBusy;
@@ -48,19 +61,28 @@ function leaveGoogle(message='已登出 Google · 顯示原本的本機帳目'){
  try{loadLedgerStorage(localStorage,LOCAL_KEY);}catch{ledgerStorage=localStorage;KEY=LOCAL_KEY;BACKUP=KEY+'-previous';raw=localStorage.getItem(KEY);state=L.initial();blocked=true;render();}
  googleLegacyBackup=null;googleNeedsSignIn=false;$('#googleRecover').hidden=true;$('#googleIdentity').textContent='';$('#googleConflictBox').hidden=true;$('#saveStatus').textContent='目前顯示未登入的本機帳目';googleBusy=false;accountSwitching=false;googleControls();googleText(message);
 }
+function popupLoginRequested(){const search=window.location?.search;return !!search&&new URLSearchParams(search).get('login')==='popup';}
+function googleLoginReturn(){
+ const hash=window.location?.hash||'';
+ const error=hash.match(/^#google-login-error(?:=([a-z]+))?$/);
+ const complete=hash==='#google-login-complete';
+ if(error||complete)window.history.replaceState(null,'',window.location.pathname+window.location.search);
+ return error?error[1]||'exchange':complete?'session':null;
+}
 async function prepareGoogle(){
  if(!window.LEDGER_GOOGLE_CONFIG){googleText("Google 登入尚未開放，目前可先使用本機記帳。");googleControls();return;}
  googleGuard();googleBusy=true;googleControls();googleText('正在準備 Google 登入…');
  try{
-  const cfg=GoogleLedger.config(window.LEDGER_GOOGLE_CONFIG);
+  const cfg=GoogleLedger.config({...window.LEDGER_GOOGLE_CONFIG,...(popupLoginRequested()?{keepSignedIn:false}:{})});
+  const loginIssue=googleLoginReturn();
   const connection=await GoogleLedger.connect(cfg);
   googleConnection=connection;
   if(connection.restore)accountSwitching=true;
   const restored=await connection.restore?.();
   if(restored){activateGoogle(restored.user,connection.store(restored.user));await resumeGoogle();return;}
-  const loginFailed=window.location?.hash==='#google-login-error';
-  if(loginFailed)window.history.replaceState(null,'',window.location.pathname+window.location.search);
-  googleText(loginFailed?'Google 授權未完成，請再登入一次。':'選擇 Google 帳號，即可連接你的雲端帳本。',loginFailed);
+  const message=loginIssue&&Object.hasOwn(GOOGLE_LOGIN_ISSUES,loginIssue)?GOOGLE_LOGIN_ISSUES[loginIssue]:'選擇 Google 帳號，即可連接你的雲端帳本。';
+  googleText(message,!!loginIssue);
+  if(loginIssue&&!$('#googleDialog').open)$('#googleDialog').showModal();
  }
  catch(e){googleText(GoogleLedger.message(e),true);}finally{googleBusy=false;accountSwitching=false;googleControls();}
 }

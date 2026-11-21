@@ -30,10 +30,10 @@ test('Google redirect binds state and PKCE, restores and refreshes a sealed sess
   const cookie=cookies(start,'__Secure-ledger-flow');
   const callbackOptions={method:'GET',headers:{Cookie:cookie}};
   const wrong=await send('/callback?state=wrong&code=test',callbackOptions);
-  assert.match(wrong.headers.get('Location'),/#google-login-error$/);
+  assert.match(wrong.headers.get('Location'),/#google-login-error=state$/);
   assert.equal(calls.length,0);
   const callback=await send('/callback?state='+url.searchParams.get('state')+'&code=test',callbackOptions);
-  assert.equal(callback.headers.get('Location'),origin+'/minimalist-ledger/');
+  assert.equal(callback.headers.get('Location'),origin+'/minimalist-ledger/#google-login-complete');
   const exchange=calls[0].options.body;
   assert.equal(exchange.get('client_secret'),'server-only');
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'),url.searchParams.get('code_challenge'));
@@ -54,4 +54,18 @@ test('Google redirect binds state and PKCE, restores and refreshes a sealed sess
   const logout=await send('/logout',{headers:{Cookie:session}});
   assert.match(logout.headers.getSetCookie().join(' '),/__Secure-ledger-session=; Max-Age=0/);
   assert.equal((await send('/session')).status,401);
+});
+
+test('OAuth callback reports a safe status for token failures without leaking Google details',async t=>{
+  const worker=(await import('../auth-worker/index.mjs')).default;
+  let googleError='invalid_client';
+  t.mock.method(globalThis,'fetch',async()=>Response.json({error:googleError,error_description:'do not expose this detail'},{status:400}));
+  for(const [reason,expected] of [['invalid_client','client'],['invalid_grant','code'],['server_error','exchange']]){
+    googleError=reason;
+    const start=await worker.fetch(new Request(base+'/start',{method:'POST',headers:{Origin:origin}}),env);
+    const params=new URL((await start.json()).url).searchParams;
+    const response=await worker.fetch(new Request(base+'/callback?code=test&state='+params.get('state'),{headers:{Cookie:cookies(start,'__Secure-ledger-flow')}}),env);
+    assert.equal(response.headers.get('Location'),origin+'/minimalist-ledger/#google-login-error='+expected);
+    assert.equal(cookies(response,'__Secure-ledger-session'),undefined);
+  }
 });
