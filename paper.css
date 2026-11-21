@@ -32,9 +32,12 @@ button,input,select{border-radius:2px}input,select{background:#fffdf7}.panel-tit
 
 /* 既有稿紙配色；逐字跳起並沿 Y 軸轉兩圈，落地後小彈。 */
 .sync-coin{display:inline-flex;gap:.025em;align-items:baseline;perspective:650px;white-space:nowrap;color:var(--green);font-weight:500;line-height:1.7;padding-top:.7em}
-.sync-coin.is-pending{color:var(--muted)}
+.sync-coin.is-guest,.sync-coin.is-pending{color:var(--ink)}
 .coin-letter{display:inline-block;transform-origin:50% 75%;transform-style:preserve-3d;animation:sync-coin-flip 2.4s cubic-bezier(.3,.05,.2,1) infinite;animation-delay:calc(var(--coin-index) * .14s);will-change:transform}
 .sync-detail{font:inherit;color:inherit;overflow-wrap:anywhere}
-.app-shell .sync-badge{flex-shrink:0;align-self:center;font-size:.75rem;line-height:1.5;text-align:right}
+.app-shell .sync-badge{flex-shrink:0;align-self:center;font-size:clamp(1.1rem,4.9vw,1.65rem);line-height:1.4;text-align:right}
+.sync-badge .sync-coin{font-weight:700;line-height:1.35}
+@media(max-width:370px){.app-shell .card-heading{flex-wrap:wrap;column-gap:6px;row-gap:0}}
+#loginPrompt{max-width:min(26rem,calc(100% - 24px));line-height:1.7}#loginPrompt .dialog-actions{flex-wrap:wrap}#loginPrompt button{min-height:44px}
 @keyframes sync-coin-flip{0%,8%{transform:translateY(0) rotateY(0deg)}25%{transform:translateY(-.65em) rotateY(360deg)}43%{transform:translateY(0) rotateY(720deg)}52%{transform:translateY(-.2em) rotateY(720deg)}62%,100%{transform:translateY(0) rotateY(720deg)}}
 @media(prefers-reduced-motion:reduce){.coin-letter{animation:none;transform:none;will-change:auto}.sync-coin{padding-top:0}}

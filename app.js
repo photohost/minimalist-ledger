@@ -10,14 +10,19 @@ const I=LedgerInsights;
 let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const statusLabels={login:'登入中',guest:'未登入',syncing:'雲端同步中',pending:'雲端尚未同步',latest:'雲端均最新'};
+let badgeState='';
 function syncText(element,message,phase=''){
  if(!element)return;element.textContent=message;
  if(!phase)return;
- const label=phase==='syncing'?'雲端同步中':'尚未同步',detail=message.startsWith(label)?message.slice(label.length).replace(/^[\s·：:]+/,''):message;
- element.innerHTML='<span class="sync-coin '+(phase==='syncing'?'is-syncing':'is-pending')+'" role="img" aria-label="'+label+'">'+Array.from(label).map((letter,index)=>'<span class="coin-letter" aria-hidden="true" style="--coin-index:'+index+'">'+letter+'</span>').join('')+'</span>'+(detail?'<span class="sync-detail"> · '+esc(detail)+'</span>':'');
+ const label=statusLabels[phase],detail=message===label?'':message;
+ element.innerHTML='<span class="sync-coin is-'+phase+'" role="img" aria-label="'+label+'">'+Array.from(label).map((letter,index)=>'<span class="coin-letter" aria-hidden="true" style="--coin-index:'+index+'">'+letter+'</span>').join('')+'</span>'+(detail?'<span class="sync-detail"> · '+esc(detail)+'</span>':'');
 }
 function syncBadge(phase=''){
- const badge=$('#syncBadge');if(!badge)return;badge.hidden=!phase;syncText(badge,phase==='syncing'?'雲端同步中':phase?'尚未同步':'',phase);
+ if(!phase)phase=googleMode||cloudClient?'pending':'guest';
+ if(phase===badgeState)return;
+ badgeState=phase;
+ syncText($('#syncBadge'),statusLabels[phase],phase);
 }
 function toast(s){$('#notice').textContent=s;$('#notice').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#notice').hidden=true,6000);toast.timer?.unref?.();}
 try{raw=ledgerStorage.getItem(KEY);if(raw!==null)state=L.migrate(JSON.parse(raw));}catch(e){blocked=true;$('#saveStatus').textContent='無法讀取資料：請先匯出原始資料，或匯入有效備份';}
@@ -134,6 +139,7 @@ function setView(view){
  currentView=view;
  for(const [name,id] of Object.entries(viewPanels)){const active=name===view;$('#'+id).hidden=!active;$('#tab-'+name).setAttribute('aria-selected',String(active));$('#tab-'+name).tabIndex=active?0:-1;}
  render();
+ if(view==='daily'&&typeof maybePromptLogin==='function')maybePromptLogin();
 }
 for(const name of Object.keys(viewPanels)){
  const tab=$('#tab-'+name);tab.onclick=()=>setView(name);
@@ -158,7 +164,7 @@ function queueCloud(){
 async function flushCloud(){
  if(!cloudClient||!cloudAuto||cloudBusy)return;
  const snapshot=currentJSON();cloudBusy=true;cloudControls();cloudText('已存本機 · 正在上傳 GitHub…',false,'syncing');
- try{if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto)cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}));}
+ try{if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto&&snapshot===currentJSON())cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}),false,'latest');}
  catch(e){cloudAuto=false;$('#cloudRetry').hidden=false;cloudText('僅存本機 · '+e.message,true);}
  finally{cloudBusy=false;cloudControls();if(cloudAuto&&currentJSON()!==cloudSynced)queueCloud();}
 }
@@ -173,25 +179,25 @@ $('#cloudForm').onsubmit=async e=>{
   if(location.protocol!=='https:'&&!['127.0.0.1','localhost'].includes(location.hostname))throw Error('請使用 HTTPS 正式網站連線 GitHub。');
   client=new GitHubLedger.GitHubStore({owner:$('#cloudOwner').value.trim(),repo:$('#cloudRepo').value.trim(),token:$('#cloudToken').value.trim()});
   $('#cloudToken').value='';const remote=await client.read();cloudClient=client;
-  if(!blocked&&remote.data&&JSON.stringify(remote.data)===currentJSON()){client.accept(remote);cloudAuto=true;cloudSynced=currentJSON();cloudText('已同步至 GitHub · 帳目版本一致');}
+  if(!blocked&&remote.data&&JSON.stringify(remote.data)===currentJSON()){client.accept(remote);cloudAuto=true;cloudSynced=currentJSON();cloudText('已同步至 GitHub · 帳目版本一致',false,'latest');}
   else cloudText(remote.data?'已連線 · 請選擇下載 GitHub 帳目，或上傳此裝置帳目。':'已連線 · 倉庫尚無帳目，請按「上傳此裝置帳目」開始自動儲存。');
  }catch(err){client?.disconnect();cloudText(err.message,true);}finally{$('#cloudToken').value='';cloudBusy=false;cloudControls();}
 };
 async function pullCloud(){
  try{
-  guardCloud();cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在讀取 GitHub 帳目…');const before=raw,remote=await cloudClient.read();
+  guardCloud();cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在讀取 GitHub 帳目…',false,'syncing');const before=raw,remote=await cloudClient.read();
   if(!remote.data)throw Error('GitHub 尚無 ledger.json，請先上傳此裝置帳目。');
   if(raw!==before)throw Error('本機帳目剛有變更，請重新下載以確認版本。');
   if(!confirm('下載會取代此裝置目前帳目，並先匯出本機備份。確定使用 GitHub 版本？')){cloudText('已取消下載 · 自動上傳暫停，請重新選擇帳目版本');return;}
   if(raw!==null)download(raw,`minimalist-before-github-${Date.now()}.json`);
   const wasBlocked=blocked;blocked=false;try{commit(remote.data,true);}catch(err){blocked=wasBlocked;throw err;}
-  cloudClient.accept(remote);cloudSynced=currentJSON();cloudAuto=true;$('#cloudRetry').hidden=true;render();cloudText('已下載 GitHub 帳目 · 後續儲存將自動上傳');
+  cloudClient.accept(remote);cloudSynced=currentJSON();cloudAuto=true;$('#cloudRetry').hidden=true;render();cloudText('已下載 GitHub 帳目 · 後續儲存將自動上傳',false,'latest');
  }catch(e){cloudText('下載未完成 · '+e.message,true);}finally{cloudBusy=false;cloudControls();}
 }
 async function uploadCloud(){
  try{
   guardCloud();if(blocked)throw Error('本機資料無法讀取，請先匯入有效備份或下載 GitHub 帳目。');
-  cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在核對 GitHub 帳目…');const before=raw,remote=await cloudClient.read();
+  cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在核對 GitHub 帳目…',false,'syncing');const before=raw,remote=await cloudClient.read();
   if(raw!==before)throw Error('本機帳目剛有變更，請重新上傳以確認版本。');
   if(remote.data&&JSON.stringify(remote.data)!==currentJSON()){
    if(!confirm('GitHub 上有不同版本。上傳將取代該版本，並先下載 GitHub 舊版本備份。確定使用此裝置帳目？')){cloudText('已取消上傳 · 自動上傳暫停，請重新選擇帳目版本');return;}

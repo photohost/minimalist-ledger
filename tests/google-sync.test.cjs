@@ -12,7 +12,7 @@ const data = savings => ({ ...L.initial(), savings });
 function browser({ local = new Map([[localKey, JSON.stringify(data(123))]]), session = new Map(), remote = new Map() } = {}) {
   const elements = new Map(), events = new Map(), exports = [];
   const storage = map => ({ getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) });
-  const element = () => ({ open: false, textContent: '', innerHTML: '', value: '', classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, querySelectorAll: () => [], close() { this.open = false; } });
+  const element = () => ({ open: false, textContent: '', innerHTML: '', value: '', classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, querySelectorAll: () => [], showModal() { this.open = true; }, close() { this.open = false; } });
   let userId = 'A', listener = () => {}, readGate, saveGate, fail = false;
   const window = { navigator: { onLine: true }, addEventListener: (name, fn) => events.set(name, fn) };
   const connection = {
@@ -41,7 +41,7 @@ function browser({ local = new Map([[localKey, JSON.stringify(data(123))]]), ses
     }
   };
   const context = vm.createContext({
-    Ledger: L, DailyLedger: require('../daily.js'), LedgerInsights: require('../insights.js'), GoogleLedger: G, connection, exports,
+    Ledger: L, DailyLedger: require('../daily.js'), LedgerInsights: require('../insights.js'), GoogleLedger: { ...G, connect: async () => connection }, connection, exports,
     document: { querySelector(key) { if (!elements.has(key)) elements.set(key, element()); return elements.get(key); } },
     localStorage: storage(local), sessionStorage: storage(session), window, Intl, Date, JSON, Error, setTimeout, clearTimeout, confirm: () => true
   });
@@ -55,6 +55,61 @@ function browser({ local = new Map([[localKey, JSON.stringify(data(123))]]), ses
     gateRead: promise => { readGate = promise; }, gateSave: promise => { saveGate = promise; }, expire: () => listener(null)
   };
 }
+
+test('首頁等待登入檢查結束再提醒，稍後登入跨同一分頁重新整理保留', async () => {
+  const session = new Map();
+  const first = browser({ session });
+  const setup = 'window.LEDGER_GOOGLE_CONFIG={clientId:"'+clientId+'",keepSignedIn:true};showLoginDuration();';
+  let finishRestore;
+  first.run(setup+'connection.restore=()=>connection.wait');
+  first.run('connection').wait = new Promise(resolve => { finishRestore=resolve; });
+  const preparing = first.run('prepareGoogle()');
+  assert.equal(first.elements.get('#syncBadge').textContent,'登入中');
+  assert.equal(first.elements.get('#loginPrompt').open,false);
+  finishRestore(null);
+  await preparing;
+  assert.equal(first.elements.get('#syncBadge').textContent,'未登入');
+  assert.equal(first.elements.get('#loginPrompt').open,true);
+  assert.match(first.elements.get('#loginPromptDuration').textContent,/30 天/);
+  first.elements.get('#loginLater').onclick();
+  first.change(44);
+  assert.equal(first.elements.get('#syncBadge').textContent,'雲端尚未同步');
+  const reopened = browser({ session, local:first.local });
+  await reopened.run(setup+'prepareGoogle()');
+  assert.equal(reopened.elements.get('#loginPrompt').open,false);
+  assert.equal(reopened.amount(),44);
+});
+
+test('首頁登入、離線、上傳與確認成功使用對應狀態', async () => {
+  const tab = browser();
+  await tab.run('window.LEDGER_GOOGLE_CONFIG={clientId:"'+clientId+'"};prepareGoogle()');
+  tab.elements.get('#loginNow').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  const label = () => tab.elements.get('#syncBadge').textContent;
+  assert.equal(label(),'雲端均最新');
+  assert.equal(tab.elements.get('#loginPrompt').open,false);
+  tab.window.navigator.onLine=false;
+  tab.events.get('offline')();
+  tab.change(55);
+  assert.equal(label(),'雲端尚未同步');
+  let release;
+  tab.gateSave(new Promise(resolve => { release=resolve; }));
+  tab.window.navigator.onLine=true;
+  const uploading=tab.events.get('online')();
+  assert.equal(label(),'雲端同步中');
+  release();
+  await uploading;
+  assert.equal(label(),'雲端均最新');
+  await tab.run('logoutGoogle()');
+  assert.equal(label(),'未登入');
+});
+
+test('自動恢復登入完成後直接顯示帳本', async () => {
+  const tab=browser();
+  await tab.run('window.LEDGER_GOOGLE_CONFIG={clientId:"'+clientId+'"};connection.restore=connection.signIn;prepareGoogle()');
+  assert.equal(tab.elements.get('#loginPrompt').open,false);
+  assert.equal(tab.elements.get('#syncBadge').textContent,'雲端均最新');
+});
 
 test('首次登入空白 Drive 後第一次儲存自動上傳，原本帳本獨立', async () => {
   const tab = browser();
@@ -190,6 +245,7 @@ test('上傳途中再記一筆，已上傳的快照不會標成最新本機版�
   assert.equal(tab.remote.get('A').data.savings, 10);
   assert.equal(JSON.parse(tab.local.get(accountKey)).savings, 20);
   assert.equal(tab.run('googleDirty()'), true);
+  assert.equal(tab.elements.get('#syncBadge').textContent, '雲端尚未同步');
   await tab.run('flushGoogle()');
   assert.equal(tab.remote.get('A').data.savings, 20);
 });
