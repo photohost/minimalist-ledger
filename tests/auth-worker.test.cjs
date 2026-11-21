@@ -69,3 +69,17 @@ test('OAuth callback reports a safe status for token failures without leaking Go
     assert.equal(cookies(response,'__Secure-ledger-session'),undefined);
   }
 });
+
+test('Worker requests reject a Google redirect without following it',async t=>{
+  const worker=(await import('../auth-worker/index.mjs')).default;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    assert.equal(url,'https://oauth2.googleapis.com/token');
+    assert.equal(options.redirect,'manual');
+    return new Response(null,{status:302,headers:{Location:'https://other.example/'}});
+  });
+  const start=await worker.fetch(new Request(base+'/start',{method:'POST',headers:{Origin:origin}}),env);
+  const params=new URL((await start.json()).url).searchParams;
+  const response=await worker.fetch(new Request(base+'/callback?code=test&state='+params.get('state'),{headers:{Cookie:cookies(start,'__Secure-ledger-flow')}}),env);
+  assert.equal(response.headers.get('Location'),origin+'/minimalist-ledger/#google-login-error=exchange');
+  assert.equal(cookies(response,'__Secure-ledger-session'),undefined);
+});

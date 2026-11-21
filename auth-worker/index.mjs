@@ -66,9 +66,15 @@ function redirect(target,cookies=[]) {
   return new Response(null,{status:303,headers:h});
 }
 
+async function fetchGoogle(url,options) {
+  const response=await fetch(url,{...options,redirect:'manual',signal:AbortSignal.timeout(12000)});
+  if(response.status>=300&&response.status<400)throw Error('Unexpected redirect from Google');
+  return response;
+}
+
 async function exchange(env,params) {
-  const response=await fetch(TOKEN_URL,{
-    method:'POST',redirect:'error',signal:AbortSignal.timeout(12000),
+  const response=await fetchGoogle(TOKEN_URL,{
+    method:'POST',
     body:new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,client_secret:env.GOOGLE_CLIENT_SECRET,...params})
   });
   const data=await response.json();
@@ -113,7 +119,7 @@ async function callback(request,url,key,env,origin) {
   if(typeof tokens.refresh_token!=='string'||!tokens.refresh_token)return fail('offline');
   let profile;
   try{
-    const response=await fetch(PROFILE_URL,{headers:{Authorization:'Bearer '+tokens.access_token},redirect:'error',signal:AbortSignal.timeout(12000)});
+    const response=await fetchGoogle(PROFILE_URL,{headers:{Authorization:'Bearer '+tokens.access_token}});
     if(!response.ok)return fail('profile');
     profile=await response.json();
     if(typeof profile.sub!=='string'||!profile.sub||typeof profile.email!=='string'||!profile.email||profile.email_verified!==true)return fail('profile');
