@@ -77,28 +77,101 @@ function renderAnalysis(c){
  if(c.income!==null&&s.allocation>c.income)$('#budgetSummary').textContent+=' · 配置超過收入 NT$'+money(s.allocation-c.income);
 }
 function show(title,body,onSave){if(accountSwitching){toast("正在切換帳號，請稍候。");return;}editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
-function num(label,id,value,required=false){return `<label>${label}<input type="number" inputmode="decimal" min="0" max="1000000000" step="0.01" id="${id}" value="${value??''}" ${required?'required':''} placeholder="未知，留空"></label>`;}
-function read(id,required=false){const v=$('#'+id).value;if(v===''&&!required)return null;const n=Number(v);if(v===''||!L.validMoney(n,false))throw Error('請輸入 0 至 10 億、最多兩位小數的金額。');return n;}
+function num(label,id,value,fieldClass=''){
+ const legacy=value!=null&&!Number.isInteger(value);
+ const cents=legacy?Math.round(value*100):0;
+ const keys=[['＋','加'],['－','減'],['×','乘'],['÷','除'],['＝','計算結果']];
+ return `<div class="amount-field"><label>${label}<input ${id?'id="'+id+'"':''} class="amount-input ${fieldClass}" type="text" inputmode="numeric" autocomplete="off" maxlength="80" value="${legacy?'':value??''}" ${legacy?'data-original="'+value+'"':''} placeholder="${legacy?'原有 '+Math.floor(cents/100)+' 元 '+cents%100+' 分':'未知，留空'}"></label>
+ ${legacy?'<button type="button" class="clear-original">清除原金額</button>':''}
+ <div class="amount-keys" role="group" aria-label="${label}運算">${keys.map(([key,name])=>`<button type="button" data-op="${key}" aria-label="${name}">${key}</button>`).join('')}</div></div>`;
+}
+function readAmount(input){
+ if(input.value===''&&input.dataset.original!==undefined)return Number(input.dataset.original);
+ try{return L.calculateAmount(input.value);}catch(error){input.focus();throw error;}
+}
+function read(id){return readAmount($('#'+id));}
+function forgetOriginal(input){
+ if(input.dataset.original===undefined)return;
+ delete input.dataset.original;
+ input.placeholder='未知，留空';
+ input.closest('.amount-field').querySelector('.clear-original')?.remove();
+}
+const editBody=$('#editBody');
+editBody.addEventListener('focusin',event=>{
+ if(!event.target.matches('.amount-input'))return;
+ editBody.querySelector('.amount-field.active')?.classList.remove('active');
+ event.target.closest('.amount-field').classList.add('active');
+});
+const validAmountChars=text=>/^[0-9+*/-]*$/.test(L.normalizeAmount(text));
+const inputHint='金額只能輸入整數，可用 ＋、－、×、÷ 計算。';
+editBody.addEventListener('beforeinput',event=>{
+ if(event.target.matches('.amount-input')&&event.data&&!validAmountChars(event.data)){
+  event.preventDefault();$('#editError').textContent=inputHint;
+ }
+});
+editBody.addEventListener('paste',event=>{
+ const input=event.target;
+ if(!input.matches('.amount-input'))return;
+ const pasted=event.clipboardData?.getData('text');
+ if(pasted==null)return;
+ if(!validAmountChars(pasted)||input.value.length-(input.selectionEnd-input.selectionStart)+pasted.length>80){
+  event.preventDefault();$('#editError').textContent=inputHint+' 算式最長 80 字。';
+ }
+});
+editBody.addEventListener('input',event=>{
+ const input=event.target;
+ if(!input.matches('.amount-input'))return;
+ if(!validAmountChars(input.value)){
+  input.value=input.dataset.lastValue??input.defaultValue;
+  $('#editError').textContent=inputHint;return;
+ }
+ input.dataset.lastValue=input.value;
+ forgetOriginal(input);$('#editError').textContent='';
+});
+function applyAmountKey(input,key){
+ try{
+  if(key==='＝'){
+   if(input.value==='')return;
+   input.value=String(L.calculateAmount(input.value));
+  }else{
+   const start=input.selectionStart,end=input.selectionEnd;
+   if(input.value.length-(end-start)>=80)throw Error('算式最長 80 字。');
+   input.setRangeText(key,start,end,'end');
+  }
+  input.dataset.lastValue=input.value;forgetOriginal(input);$('#editError').textContent='';
+ }catch(error){$('#editError').textContent=error.message;}
+ input.focus();
+}
+editBody.addEventListener('click',event=>{
+ const button=event.target.closest('[data-op],.clear-original');
+ if(!button)return;
+ const input=button.closest('.amount-field').querySelector('.amount-input');
+ if(button.classList.contains('clear-original')){forgetOriginal(input);input.focus();return;}
+ applyAmountKey(input,button.dataset.op);
+});
+editBody.addEventListener('keydown',event=>{
+ if(event.key==='='&&event.target.matches('.amount-input')){event.preventDefault();applyAmountKey(event.target,'＝');}
+});
 function checkbox(id,done){return `<label class="check"><input type="checkbox" id="${id}" ${done?'checked':''}>已完成（須填實際金額；無支出可填 0）</label>`;}
 function readItem(prefix){const x={budget:read(prefix+'b'),actual:read(prefix+'a'),done:$('#'+prefix+'d').checked};if(x.done&&x.actual===null)throw Error('勾選完成前，請填寫實際金額。');return x;}
 function editMeal(date,index){const x=cycle().days[date]?.meals[index]||L.item();show(date+' · '+L.mealNames[index],`${num('實際金額','ma',x.actual)}<p class="hint">按儲存即記帳；填 0 表示沒有花費，留空則清除這筆金額。</p>`,c=>{const actual=read('ma');L.day(c,date).meals[index]={...x,actual,done:actual!==null};});}
 const options=(selected)=>L.categories.map(x=>`<option ${x===selected?'selected':''}>${x}</option>`).join('');
-function detailRow(x={category:'其他',note:'',...L.item()}){return `<div class="detail-row" data-budget="${x.budget??''}"><div class="row-top"><select aria-label="分類">${options(x.category)}</select><button type="button" class="remove">移除</button></div><label>說明<input class="note" maxlength="200" value="${esc(x.note)}" placeholder="例如：咖啡、回診"></label><label>實際金額<input class="actual" type="number" min="0" max="1000000000" step="0.01" inputmode="decimal" value="${x.actual??''}" placeholder="未知，留空"></label></div>`;}
+function detailRow(x={category:'其他',note:'',...L.item()}){return `<div class="detail-row" data-budget="${x.budget??''}"><div class="row-top"><select aria-label="分類">${options(x.category)}</select><button type="button" class="remove">移除</button></div><label>說明<input class="note" maxlength="200" value="${esc(x.note)}" placeholder="例如：咖啡、回診"></label>${num('實際金額','',x.actual,'actual')}</div>`;}
 function editOther(date){const c=cycle(),rows=c.days[date]?.other||[];show(date+' · 其他',`<p class="hint">只記錄每日額外花費。房租與訂閱請到「設定」，不在此重複記錄。信用卡僅記未曾入帳的消費。</p><div id="rows">${rows.map(detailRow).join('')}</div><button type="button" id="addRow">新增明細</button>`,draft=>{
- const list=[];for(const row of $('#rows').children){const value=row.querySelector('.actual').value,actual=value===''?null:Number(value);if(!L.validMoney(actual))throw Error('明細金額不正確。');const x={category:row.querySelector('select').value,note:row.querySelector('.note').value,budget:row.dataset.budget===''?null:Number(row.dataset.budget),actual,done:actual!==null};list.push(x);}L.day(draft,date).other=list;
+ const list=[];for(const row of $('#rows').children){const actual=readAmount(row.querySelector('.actual'));const x={category:row.querySelector('select').value,note:row.querySelector('.note').value,budget:row.dataset.budget===''?null:Number(row.dataset.budget),actual,done:actual!==null};list.push(x);}L.day(draft,date).other=list;
  });
  $('#addRow').onclick=()=>$('#rows').insertAdjacentHTML('beforeend',detailRow());
  $('#rows').onclick=e=>{if(e.target.classList.contains('remove'))e.target.closest('.detail-row').remove();};
 }
 function editFixed(id,date){if(id==='subscription')return editSubscriptions(date);const x=cycle().fixed.find(x=>x.id===id),ds=L.dates(selected);show(x.name+' · 固定支出',`<p class="hint">整期只計算一次；實際金額為累計付款。此筆明細預算不會與「固定支出」分類預算重複相加。</p><div class="fields">${num('每期金額（預算）','fb',x.budget)}${num('實際金額（累計）','fa',x.actual)}</div><label>付款日（可留空）<input type="date" id="fdate" min="${ds[0]}" max="${ds.at(-1)}" value="${date||x.date||''}"></label>${checkbox('fd',x.done)}`,c=>{const y=c.fixed.find(y=>y.id===id);Object.assign(y,readItem('f'),{date:$('#fdate').value||null});});}
 function editSettings(){const c=cycle(),s=L.stats({...c,key:selected}),b=c.budgets||{meals:s.buckets.meals.planned,other:s.buckets.other.planned,fixed:s.buckets.fixed.planned,savings:c.savingTarget};show('預算設定',`<p class="hint">${selected} 這一期，所有預算由你自行設定。留空表示未知，0 表示不配置。儲蓄與消費分開，明細金額不再重複加進分類預算。</p>${num('本期實領收入','income',c.income)}<div class="fields">${num('三餐開銷','bmeals',b.meals)}${num('其他','bother',b.other)}${num('固定支出','bfixed',b.fixed)}${num('儲蓄','bsavings',b.savings)}</div><p class="hint">配置合計＝三類支出預算＋儲蓄；超過收入仍可儲存，系統會提醒。新月份一律留空。</p>`,draft=>{draft.income=read('income');draft.budgets={meals:read('bmeals'),other:read('bother'),fixed:read('bfixed'),savings:read('bsavings')};draft.savingTarget=draft.budgets.savings;});}
-function subscriptionRow(x,date){const ds=L.dates(selected);return `<div class="subscription-row" data-id="${esc(x?.id||'sub-'+Date.now()+'-'+Math.random().toString(36).slice(2))}"><div class="row-top"><label>訂閱內容<input class="sub-name" maxlength="80" value="${esc(x?.name||'')}" placeholder="例如：音樂服務"></label><button type="button" class="sub-remove">移除</button></div><div class="fields"><label>每期金額（預算）<input class="sub-budget" type="number" min="0" max="1000000000" step="0.01" value="${x?.budget??''}" inputmode="decimal"></label><label>實際付款（累計）<input class="sub-actual" type="number" min="0" max="1000000000" step="0.01" value="${x?.actual??''}" inputmode="decimal"></label></div><label>付款日期<input class="sub-date" type="date" min="${ds[0]}" max="${ds.at(-1)}" value="${x?.date||date||''}"></label><label class="check"><input class="sub-done" type="checkbox" ${x?.done?'checked':''}>本期已付清</label></div>`;}
+function subscriptionRow(x,date){const ds=L.dates(selected);return `<div class="subscription-row" data-id="${esc(x?.id||'sub-'+Date.now()+'-'+Math.random().toString(36).slice(2))}"><div class="row-top"><label>訂閱內容<input class="sub-name" maxlength="80" value="${esc(x?.name||'')}" placeholder="例如：音樂服務"></label><button type="button" class="sub-remove">移除</button></div><div class="fields">${num('每期金額（預算）','',x?.budget,'sub-budget')}${num('實際付款（累計）','',x?.actual,'sub-actual')}</div><label>付款日期<input class="sub-date" type="date" min="${ds[0]}" max="${ds.at(-1)}" value="${x?.date||date||''}"></label><label class="check"><input class="sub-done" type="checkbox" ${x?.done?'checked':''}>本期已付清</label></div>`;}
 function editSubscriptions(date){
  const sub=cycle().fixed.find(x=>x.id==='subscription');show('訂閱明細',`<p class="hint">自行新增訂閱名稱與每期金額。填「每期金額」只代表預算；付款後再填實際金額。每筆只計一次。</p><div id="subscriptions">${(sub.items||[]).map(x=>subscriptionRow(x)).join('')}</div><button type="button" id="addSubscription">新增訂閱</button>`,c=>{
-  const list=[];for(const row of $('#subscriptions').children){const amount=sel=>{const value=row.querySelector(sel).value,n=value===''?null:Number(value);if(!L.validMoney(n))throw Error('訂閱金額不正確。');return n;};const x={id:row.dataset.id,name:row.querySelector('.sub-name').value.trim(),budget:amount('.sub-budget'),actual:amount('.sub-actual'),date:row.querySelector('.sub-date').value||null,done:row.querySelector('.sub-done').checked};if(!x.name)throw Error('請填寫每筆訂閱內容，或移除空白列。');if(x.done&&x.actual===null)throw Error('已付清訂閱必須填寫實際金額。');list.push(x);}const x=c.fixed.find(x=>x.id==='subscription');Object.assign(x,{budget:null,actual:null,done:false,date:null,items:list});
+  const list=[];for(const row of $('#subscriptions').children){const amount=sel=>readAmount(row.querySelector(sel));const x={id:row.dataset.id,name:row.querySelector('.sub-name').value.trim(),budget:amount('.sub-budget'),actual:amount('.sub-actual'),date:row.querySelector('.sub-date').value||null,done:row.querySelector('.sub-done').checked};if(!x.name)throw Error('請填寫每筆訂閱內容，或移除空白列。');if(x.done&&x.actual===null)throw Error('已付清訂閱必須填寫實際金額。');list.push(x);}const x=c.fixed.find(x=>x.id==='subscription');Object.assign(x,{budget:null,actual:null,done:false,date:null,items:list});
  });
  $('#addSubscription').onclick=()=>$('#subscriptions').insertAdjacentHTML('beforeend',subscriptionRow(null,date));
- $('#subscriptions').onclick=e=>{if(e.target.classList.contains('sub-remove')){const row=e.target.closest('.subscription-row');if(row.querySelector('.sub-actual').value!==''&&!confirm('移除後，本期統計會扣掉這筆訂閱的付款金額。確定移除？'))return;row.remove();}};
+ $('#subscriptions').onclick=e=>{if(e.target.classList.contains('sub-remove')){const row=e.target.closest('.subscription-row');const paid=row.querySelector('.sub-actual');if((paid.value!==''||paid.dataset.original!==undefined)&&!confirm('移除後，本期統計會扣掉這筆訂閱的付款金額。確定移除？'))return;row.remove();}};
 }
 function saveEditor(){try{const candidate=L.clone(state);candidate.cycles[editingCycle]??=L.defaults();editing(candidate.cycles[editingCycle],candidate);commit(candidate);$('#editor').close();render();return true;}catch(e){$('#editError').textContent=e.message||'儲存失敗，請匯出備份後重試。';return false;}}
 $('#editForm').onsubmit=e=>{e.preventDefault();saveEditor();};$('#close').onclick=$('#cancel').onclick=()=>$('#editor').close();

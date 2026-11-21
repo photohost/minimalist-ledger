@@ -61,6 +61,33 @@
   d.other.forEach(x=>{if(x.actual!==null)rows.push({name:x.note||x.category,category:x.category,actual:x.actual});});
   return rows;
  }
- const api={categories,mealNames,budgetKeys,clone,iso,cycleKey,dates,defaults,initial,item,day,stats,validate,validMoney,fixedRows,fixedTotal,migrate,breakdown};
+ function normalizeAmount(text){
+  return text.replace(/[０-９＋－＊／]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xfee0)).replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');
+ }
+ function calculateAmount(text){
+  if(text==='')return null;
+  const expression=normalizeAmount(text);
+  if(expression.length>80||!/^\d+(?:[+*/-]\d+)*$/.test(expression))throw Error('請用整數和加減乘除輸入完整算式。');
+  // Accumulate exact fractions so intermediate divisions never round the bill.
+  let total=0n,denominator=1n,term=0n,divisor=1n;
+  for(const [,operator,digits] of expression.matchAll(/([+*/-]?)(\d+)/g)){
+   const n=BigInt(digits);
+   if(operator==='*'){term*=n;continue;}
+   if(operator==='/'){
+    if(n===0n)throw Error('無法除以 0，請修改算式。');
+    divisor*=n;continue;
+   }
+   total=total*divisor+term*denominator;
+   denominator*=divisor;
+   term=operator==='-'?-n:n;
+   divisor=1n;
+  }
+  total=total*divisor+term*denominator;
+  denominator*=divisor;
+  if(total<0n||total>1000000000n*denominator)throw Error('金額須介於 0 與 10 億元之間。');
+  if(total%denominator!==0n)throw Error('算式結果有餘數，請調整為整元後再儲存。');
+  return Number(total/denominator);
+ }
+ const api={categories,mealNames,budgetKeys,clone,iso,cycleKey,dates,defaults,initial,item,day,stats,validate,validMoney,fixedRows,fixedTotal,migrate,breakdown,normalizeAmount,calculateAmount};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.Ledger=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
