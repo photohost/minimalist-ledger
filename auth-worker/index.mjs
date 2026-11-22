@@ -103,7 +103,7 @@ async function begin(key,env,origin) {
 }
 
 async function callback(request,url,key,env,origin) {
-  const home=origin+'/minimalist-ledger/';
+  const home=origin+(origin===SPENDING_ORIGIN?'/':'/minimalist-ledger/');
   const clearFlow=cookie(FLOW_COOKIE,'',0);
   const fail=stage=>redirect(home+'#google-login-error='+stage,[clearFlow]);
   const flow=await unseal(request,FLOW_COOKIE,key);
@@ -153,11 +153,26 @@ async function session(request,key,env,force) {
   return json({user:active.user,accessToken:active.accessToken,expiresAt:Math.min(active.accessExpiresAt,active.expiresAt)},200,cookies);
 }
 
+const SPENDING_ORIGIN='https://spending.harunoji.one';
+const publicFiles=new Set(['','index.html','privacy.html','firebase-legacy.html','style.css','paper.css','core.js','daily.js','insights.js','github-store.js','google-config.js','drive-store.js','app.js','google-sync.js','firebase-config.js','firebase-store.js','firebase-sync-legacy.js','ledger-icon-b.svg','ledger-b-32.png','ledger-b-180.png','ledger-b-192.png','ledger-b-512.png','ledger.webmanifest']);
+
+async function serveLedger(request,url){
+  const file=url.pathname.slice(1);
+  if(!publicFiles.has(file))return new Response('Not found',{status:404});
+  if(!['GET','HEAD'].includes(request.method))return new Response(null,{status:405});
+  const upstream=new URL('https://blog.harunoji.one/minimalist-ledger/'+file);
+  const version=url.searchParams.get('v');
+  if(version&&/^[\w.-]{1,64}$/.test(version))upstream.searchParams.set('v',version);
+  // Only public assets are requested upstream. Cookies and request headers stay on this origin.
+  return fetch(upstream.href,{method:request.method,redirect:'manual'});
+}
+
 export default {
   async fetch(request,env) {
     const url=new URL(request.url);
-    const origin=env.SITE_ORIGIN;
-    if(url.origin!==origin)return json({error:'not_found'},404);
+    const origin=url.origin;
+    if(origin!==env.SITE_ORIGIN&&origin!==SPENDING_ORIGIN)return json({error:'not_found'},404);
+    if(origin===SPENDING_ORIGIN&&!url.pathname.startsWith(PATH+'/'))return serveLedger(request,url);
     const action=url.pathname.slice(PATH.length);
     if(!url.pathname.startsWith(PATH+'/')||!['/callback','/start','/session','/refresh','/logout'].includes(action))return json({error:'not_found'},404);
     if(action==='/callback'?request.method!=='GET':request.method!=='POST')return json({error:'method_not_allowed'},405);
