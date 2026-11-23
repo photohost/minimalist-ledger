@@ -1,12 +1,12 @@
 # 直接 Google 登入＋Google Drive 儲存
 
-v1.7 使用 Google Identity Services 及 Google Drive API，主網站不載入 Firebase SDK，也不使用 Firestore。網站仍由 GitHub Pages 提供。
+使用 Google Identity Services 及 Google Drive API。網站不使用 Firebase；帳目直接存於使用者自己的 Google Drive。
 
 此指南給網站管理者使用，訪客不需操作 Google Cloud。
 
 ## 管理者需要準備什麼
 
-一個 Google Cloud 專案與「網頁應用程式」OAuth 用戶端 ID（結尾 `.apps.googleusercontent.com`）。這個 ID 是公開設定，不是用戶端密碼。可以使用原本 Firebase 專案對應的同一個 Google Cloud 專案，不需要另建 Firebase 或資料庫。
+一個 Google Cloud 專案與「網頁應用程式」OAuth 用戶端 ID（結尾 `.apps.googleusercontent.com`）。這個 ID 是公開設定，不是用戶端密碼。可以使用既有的 Google Cloud 專案，不需要另建 Firebase 或資料庫。
 
 ## 1. 啟用 Google Drive API
 
@@ -35,11 +35,11 @@ v1.7 使用 Google Identity Services 及 Google Drive API，主網站不載入 F
    ```text
    https://blog.harunoji.one
    ```
-4. 不要加 `/minimalist-ledger/`、查詢字串或結尾路徑。本版使用 Google 官方彈出授權，不需新增 Firebase 的重新導向網址。
+4. 不要加 `/minimalist-ledger/`、查詢字串或結尾路徑。本版使用 Google 官方彈出授權。
 5. 若使用 GitHub 原生網址，另加 `https://photohost.github.io`；本機測試才加 `http://localhost:4173` 與 `http://127.0.0.1:4173`。
 6. 建立後複製 **Client ID / 用戶端 ID**。不要複製 Client secret / 用戶端密碼。
 
-若原本 Firebase 已建立 Web OAuth client，可以在同一專案檢視並使用該網頁用戶端 ID，但仍需加入本網站的 JavaScript 來源並啟用 Drive API。
+若專案已有 Web OAuth client，可以直接使用該用戶端 ID，但仍需加入本網站的 JavaScript 來源並啟用 Drive API。
 
 ## 4. 管理者設定網站一次
 
@@ -69,9 +69,7 @@ window.LEDGER_GOOGLE_CONFIG = {
 ## 舊資料移轉
 
 - 本機／GitHub：先下載最新帳目到本機並匯出備份，再登入 Drive，按匯入原本帳目。
-- Firebase：網站提供 [舊版匯出頁](https://blog.harunoji.one/minimalist-ledger/firebase-legacy.html)。以原本設定及帳號登入，讀取 Firebase 帳目並「匯出備份」。再回新版登入 Drive，到設定匯入這份 JSON，然後上傳。
-- 舊版只供取回舊帳目；新版主頁不載入 Firebase。既有 Firebase 帳目、專案與 GitHub 檔案均不會被自動刪除或搬移。
-- 主網站的 Drive 暫存使用獨立鍵，不會把舊 Firebase 工作階段當成 Drive 帳本。
+- Firebase 版本已於 1.9.0 移除，舊匯出頁不再提供。尚未移轉的 Firebase 帳目請在移除前自行匯出，或在 Firebase 主控台保留原資料；本網站不會自動刪除或搬移它們。
 
 ## Drive 中的檔案與同步
 
@@ -101,7 +99,7 @@ window.LEDGER_GOOGLE_CONFIG = {
 | access_denied／無法登入 | 測試名單是否加入你的帳號，是否拒絕檔案權限 |
 | Drive 無法存取 | Drive API 已啟用、授權有同意檔案範圍、Drive 有空間 |
 | 權杖到期 | 登出後登入同一 Google 帳號繼續同步 |
-| 沒讀到原帳目 | 相同 OAuth 專案／用戶端 ID 與相同 Google 帳號；Firebase 舊帳目須明確移轉 |
+| 沒讀到原帳目 | 相同 OAuth 專案／用戶端 ID 與相同 Google 帳號 |
 | 多個同時編輯版本 | 在 Google 帳號視窗選擇要採用的版本；其他版本仍留在 Drive |
 
 ## 驗證

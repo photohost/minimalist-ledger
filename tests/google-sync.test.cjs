@@ -132,7 +132,7 @@ test('關閉分頁前尚未上傳的金額，重開並登入同一帳號後接�
   assert.equal(JSON.parse(first.local.get(accountKey)).savings, 20);
   const reopened = browser({ local: first.local, remote: first.remote });
   assert.equal(reopened.session.size, 0);
-  assert.equal(reopened.amount(), 123);
+  assert.equal(reopened.amount(), 20);
   await reopened.login();
   assert.equal(reopened.amount(), 20);
   assert.equal(reopened.remote.get('A').data.savings, 20);
@@ -284,4 +284,75 @@ test('登入失效後，延遲的雲端回應不能回填另一個帳本', async
   await pending;
   assert.equal(tab.run('googleMode'), false);
   assert.equal(tab.amount(), 123);
+});
+
+test('重開網頁直接顯示上次的帳本，恢復登入期間仍可記帳', async () => {
+  const first = browser();
+  await first.login();
+  first.change(10);
+  await first.run('flushGoogle()');
+  const reopened = browser({ local: first.local, remote: first.remote });
+  assert.equal(reopened.amount(), 10);
+  assert.equal(reopened.run('KEY'), accountKey);
+  const setup = 'window.LEDGER_GOOGLE_CONFIG={clientId:"'+clientId+'",keepSignedIn:true};';
+  let finishRestore;
+  reopened.run(setup+'connection.restore=()=>connection.wait');
+  reopened.run('connection').wait = new Promise(resolve => { finishRestore = resolve; });
+  const preparing = reopened.run('prepareGoogle()');
+  assert.equal(reopened.run('accountSwitching'), false);
+  reopened.change(25);
+  assert.equal(reopened.amount(), 25);
+  finishRestore({ user: { uid: 'A', email: 'a@example.test' } });
+  await preparing;
+  assert.equal(reopened.amount(), 25);
+  assert.equal(reopened.remote.get('A').data.savings, 25);
+});
+
+test('登出後下次開啟回到未登入的本機帳本', async () => {
+  const tab = browser();
+  await tab.login();
+  tab.change(10);
+  await tab.run('logoutGoogle()');
+  const reopened = browser({ local: tab.local, remote: tab.remote });
+  assert.equal(reopened.run('KEY'), localKey);
+  assert.equal(reopened.amount(), 123);
+});
+
+test('月曆依記帳週期排列，涵蓋 5 日至次月 4 日', () => {
+  const tab = browser();
+  tab.run("currentView='overview';selected='2026-11';render()");
+  const html = tab.elements.get('#calendar').innerHTML;
+  assert.equal((html.match(/data-day=/g) || []).length, 30);
+  assert.ok(html.includes('data-day="2026-11-05"'));
+  assert.ok(html.includes('data-day="2026-12-04"'));
+  assert.ok(!html.includes('data-day="2026-11-04"'));
+  assert.ok(!html.includes('previous-cycle'));
+  assert.equal(tab.elements.get('#calendarLegend').textContent, '本期 11/05 至 12/04 · 共 30 天');
+});
+
+test('月曆顯示所屬週期的金額，含跨月的那幾天', () => {
+  const tab = browser();
+  tab.run("currentView='overview';selected='2026-11';commit({...state,cycles:{'2026-11':{...Ledger.defaults(),days:{'2026-12-02':{meals:[Ledger.item(),Ledger.item(),Ledger.item()],other:[{category:'飲料',note:'茶',budget:null,actual:48,done:true}]}}}}});render()");
+  const html = tab.elements.get('#calendar').innerHTML;
+  assert.match(html, /data-day="2026-12-02"[^>]*>[\s\S]*?48/);
+});
+
+test('每日其他分類不提供房租，既有紀錄仍保留原分類', () => {
+  const tab = browser();
+  assert.ok(!tab.run("options('其他')").includes('房租'));
+  assert.ok(tab.run("options('其他')").includes('<option selected>其他</option>'));
+  assert.ok(tab.run("options('房租')").includes('<option selected>房租</option>'));
+});
+
+test('只有目前分頁會重畫：背景分頁不做分析與設定的運算', () => {
+  const tab = browser();
+  tab.run("currentView='daily';render()");
+  assert.equal(tab.run("$('#calendar').innerHTML"), '');
+  assert.equal(tab.run("$('#spendingChart').innerHTML"), '');
+  assert.equal(tab.run("$('#fixed').innerHTML"), '');
+  tab.run("setView('analysis')");
+  assert.notEqual(tab.run("$('#spendingChart').innerHTML"), '');
+  assert.equal(tab.run("$('#calendar').innerHTML"), '');
+  tab.run("setView('settings')");
+  assert.notEqual(tab.run("$('#fixed').innerHTML"), '');
 });

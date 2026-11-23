@@ -21,3 +21,20 @@ test('備份可完整往返；拒絕不合法日期、分類、金額與完成�
  const bad3=L.clone(s);bad3.cycles['2026-11'].days['2026-11-06'].other[0].category='不存在';assert.throws(()=>L.validate(bad3));
 });
 test('週期設定隔離、零元完成及負餘額',()=>{const a=fixture(),b=fixture();a.income=1;a.fixed[0].actual=100;L.day(a,'2026-11-06').meals[0]={budget:100,actual:0,done:true};assert.equal(b.income,1000);assert.equal(L.stats({...a,key:'2026-11'}).available,-99);});
+
+test('固定支出分類仍可驗證，但每日其他不提供房租',()=>{
+ assert.ok(L.categories.includes('房租'));
+ assert.ok(!L.dailyCategories.includes('房租'));
+ assert.deepEqual(L.dailyCategories,L.categories.filter(x=>x!=='房租'));
+ const book=L.initial();book.cycles['2026-11']=L.defaults();
+ assert.doesNotThrow(()=>L.validate(book));
+});
+
+test('四捨五入只定義一次，由 core 匯出供每日計算使用',()=>{
+ const fs=require('node:fs');
+ assert.equal(L.round(1.005),1.01);
+ assert.equal(L.round(2.5),2.5);
+ const daily=fs.readFileSync(require.resolve('../daily.js'),'utf8');
+ assert.ok(daily.includes('const round=L.round;'));
+ assert.equal((daily.match(/Math\.round\(\(n\+Number\.EPSILON\)/g)||[]).length,0);
+});

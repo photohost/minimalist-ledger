@@ -83,3 +83,12 @@ test('Worker requests reject a Google redirect without following it',async t=>{
   assert.equal(response.headers.get('Location'),origin+'/minimalist-ledger/#google-login-error=exchange');
   assert.equal(cookies(response,'__Secure-ledger-session'),undefined);
 });
+
+test('Worker 對文件回應加上安全標頭，並由 CSP_MODE 決定模式',async()=>{
+ const fs=require('node:fs');
+ const src=fs.readFileSync(require.resolve('../auth-worker/index.mjs'),'utf8');
+ assert.ok(src.includes("import {isDocument,documentHeaders} from './security.mjs'"));
+ assert.ok(src.includes('documentHeaders(file,env.CSP_MODE)'));
+ const toml=fs.readFileSync(require.resolve('../auth-worker/wrangler.toml'),'utf8');
+ assert.ok(/CSP_MODE = "(report-only|enforce)"/.test(toml));
+});

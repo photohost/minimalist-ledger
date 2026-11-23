@@ -46,7 +46,12 @@ function googleGuard(){if(googleBusy||cloudBusy||accountSwitching)throw Error('�
 function googleDirty(){return raw!==null&&currentJSON()!==googleSynced;}
 function googleCache(){
  // A failed checkpoint leaves the saved notebook intact and can only cause another sync attempt.
- try{ledgerStorage.setItem(KEY+'-sync',JSON.stringify({revision:googleClient.revision??null,synced:googleSynced}));}catch{}
+ // The file pointer lets the next visit confirm the cloud version without downloading the ledger again.
+ try{
+  const known=googleClient.acceptedContent;
+  const file=known&&known.headRevisionId&&known.text===googleSynced?{id:known.id,headRevisionId:known.headRevisionId}:null;
+  ledgerStorage.setItem(KEY+'-sync',JSON.stringify({revision:googleClient.revision??null,synced:googleSynced,file}));
+ }catch{}
 }
 function checkGoogleLocal(){
  if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一個分頁已更新帳目。請重新開啟網站並登入同一帳號。');
@@ -67,8 +72,10 @@ function loadGoogleLedger(key){
  let checkpoint;
  try{checkpoint=JSON.parse(localStorage.getItem(key+'-sync'));}catch{}
  if(typeof checkpoint?.revision==='string'&&raw!==null){
-  googleClient.accept(checkpoint);
-  googleSynced=typeof checkpoint.synced==='string'?checkpoint.synced:null;
+  const synced=typeof checkpoint.synced==='string'?checkpoint.synced:null;
+  const file=checkpoint.file&&typeof checkpoint.file.id==='string'&&typeof checkpoint.file.headRevisionId==='string'?checkpoint.file:null;
+  googleClient.accept(file&&synced!==null?{revision:checkpoint.revision,file,text:synced}:{revision:checkpoint.revision});
+  googleSynced=synced;
  }
 }
 function loadLedgerStorage(storage,key){const source=storage.getItem(key),next=source===null?L.initial():L.migrate(JSON.parse(source));ledgerStorage=storage;KEY=key;BACKUP=key+'-previous';raw=source;state=next;blocked=false;render();}
@@ -76,6 +83,7 @@ function leaveGoogle(message='已登出 Google · 顯示原本的本機帳目'){
  googleEpoch++;clearTimeout(googleTimer);googleUnsubscribe?.();googleUnsubscribe=null;googleAuto=false;googleClient=null;googleSynced=null;googleMode=false;syncBadge();
  // Clear the authenticated ledger from the view, including any open edit/detail dialog.
  editing=null;for(const id of ['editor','dayDetails'])if($('#'+id).open)$('#'+id).close();$('#editBody').innerHTML='';$('#detailsBody').innerHTML='';
+ try{localStorage.removeItem(ACCOUNT_KEY);}catch{}
  try{loadLedgerStorage(localStorage,LOCAL_KEY);}catch{ledgerStorage=localStorage;KEY=LOCAL_KEY;BACKUP=KEY+'-previous';raw=localStorage.getItem(KEY);state=L.initial();blocked=true;render();}
  googleLegacyBackup=null;googleNeedsSignIn=false;$('#googleRecover').hidden=true;$('#googleIdentity').textContent='';$('#googleConflictBox').hidden=true;$('#saveStatus').textContent='目前顯示未登入的本機帳目';googleBusy=false;accountSwitching=false;googleControls();googleText(message);
 }
@@ -95,7 +103,7 @@ async function prepareGoogle(){
   const loginIssue=googleLoginReturn();
   const connection=await GoogleLedger.connect(cfg);
   googleConnection=connection;
-  if(connection.restore)accountSwitching=true;
+  if(connection.restore&&KEY===LOCAL_KEY)accountSwitching=true;
   const restored=await connection.restore?.();
   if(restored){activateGoogle(restored.user,connection.store(restored.user));await resumeGoogle();return;}
   const message=loginIssue&&Object.hasOwn(GOOGLE_LOGIN_ISSUES,loginIssue)?GOOGLE_LOGIN_ISSUES[loginIssue]:'選擇 Google 帳號，即可連接你的雲端帳本。';
@@ -114,6 +122,7 @@ function activateGoogle(user,client){
   googleEpoch++;googleClient=client;googleMode=true;googleAuto=false;googleSynced=null;
   syncBadge('pending');
   const key=LOCAL_KEY+'-drive-'+client.projectId+'-'+encodeURIComponent(user.uid);
+  try{localStorage.setItem(ACCOUNT_KEY,key);}catch{}
   try{loadGoogleLedger(key);}
   catch{ledgerStorage=localStorage;KEY=key;BACKUP=key+'-previous';raw=localStorage.getItem(key);state=L.initial();blocked=true;render();}
   $('#googleRecover').hidden=googleLegacyBackup===null;
@@ -197,7 +206,7 @@ async function pullGoogle(ask=true){
    if(!startUpload)googleText('Google Drive 尚無帳目，儲存第一筆後會自動同步。',false,blocked?'pending':'latest');
   }else{
    const same=!blocked&&raw!==null&&currentJSON()===JSON.stringify(remote.data);
-   if(!ask&&raw!==null&&remote.extendsLocal===false){googleText('Drive 回傳的版本與本機歷史不一致，已保留本機帳目。請稍後再讀取或先匯出備份。',true);return;}
+   if(!ask&&!same&&raw!==null&&remote.extendsLocal===false){googleText('Drive 回傳的版本與本機歷史不一致，已保留本機帳目。請稍後再讀取或先匯出備份。',true);return;}
    if(!same&&raw!==null&&(ask||googleDirty()||blocked)){
     if(!ask){googleText('本機有未同步帳目，已保留。請匯出備份後比較雲端版本。',true);return;}
     if(!confirm('讀取雲端會取代本機帳目，並先匯出目前版本。繼續？')){googleText('已取消讀取雲端帳目。',false,'pending');googleQueue();return;}

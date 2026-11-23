@@ -1,6 +1,8 @@
 (function(root){
  'use strict';
  const categories=['房租','水電網路','車資','信用卡費','分期款項','醫療','娛樂','人情','飲料','宵夜','其他'];
+ // 每日「其他」不列出固定支出專用的分類，避免與設定中的房租重複記帳。
+ const dailyCategories=categories.filter(x=>x!=='房租');
  const mealNames=['早餐','午餐','晚餐'],budgetKeys=['meals','other','fixed','savings'];
  const clone=x=>JSON.parse(JSON.stringify(x));
  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -33,10 +35,10 @@
    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(key)||+key.slice(0,4)<1900||+key.slice(0,4)>2200||!c||!validMoney(c.income)||!validMoney(c.savingTarget)||!Array.isArray(c.fixed)||c.fixed.length>100||!c.days||typeof c.days!=='object'||Array.isArray(c.days))fail();
    if(c.budgets!==undefined&&(!c.budgets||Array.isArray(c.budgets)||budgetKeys.some(k=>!validMoney(c.budgets[k]))))fail();
    if(c.undatedOther!==undefined){if(!Array.isArray(c.undatedOther)||c.undatedOther.length>100)fail();c.undatedOther.forEach(x=>{check(x);if(!categories.includes(x.category)||typeof x.note!=='string'||x.note.length>200)fail();});}
-   const allowed=dates(key),ids=new Set();
-   const named=(x,set)=>{check(x);if(typeof x.id!=='string'||set.has(x.id)||typeof x.name!=='string'||x.name.length>80||(x.date!==null&&!allowed.includes(x.date)))fail();set.add(x.id);};
+   const allowed=new Set(dates(key)),ids=new Set();
+   const named=(x,set)=>{check(x);if(typeof x.id!=='string'||set.has(x.id)||typeof x.name!=='string'||x.name.length>80||(x.date!==null&&!allowed.has(x.date)))fail();set.add(x.id);};
    c.fixed.forEach(x=>{named(x,ids);if(!categories.includes(x.category))fail();if(x.items!==undefined){if(x.id!=='subscription'||!Array.isArray(x.items)||x.items.length>100)fail();const subIds=new Set();x.items.forEach(y=>named(y,subIds));}});
-   for(const [date,d] of Object.entries(c.days)){if(!allowed.includes(date)||!d||!Array.isArray(d.meals)||d.meals.length!==3||!Array.isArray(d.other)||d.other.length>500)fail();d.meals.forEach(check);d.other.forEach(x=>{check(x);if(!categories.includes(x.category)||typeof x.note!=='string'||x.note.length>200)fail();});}
+   for(const [date,d] of Object.entries(c.days)){if(!allowed.has(date)||!d||!Array.isArray(d.meals)||d.meals.length!==3||!Array.isArray(d.other)||d.other.length>500)fail();d.meals.forEach(check);d.other.forEach(x=>{check(x);if(!categories.includes(x.category)||typeof x.note!=='string'||x.note.length>200)fail();});}
   }
   return s;
  }
@@ -88,6 +90,6 @@
   if(total%denominator!==0n)throw Error('算式結果有餘數，請調整為整元後再儲存。');
   return Number(total/denominator);
  }
- const api={categories,mealNames,budgetKeys,clone,iso,cycleKey,dates,defaults,initial,item,day,stats,validate,validMoney,fixedRows,fixedTotal,migrate,breakdown,normalizeAmount,calculateAmount};
+ const api={round,categories,dailyCategories,mealNames,budgetKeys,clone,iso,cycleKey,dates,defaults,initial,item,day,stats,validate,validMoney,fixedRows,fixedTotal,migrate,breakdown,normalizeAmount,calculateAmount};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.Ledger=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

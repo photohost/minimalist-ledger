@@ -2,9 +2,9 @@
  'use strict';
  const L=typeof module!=='undefined'&&module.exports?require('./core.js'):root.Ledger;
  function shift(date,amount){const d=new Date(date+'T12:00:00');d.setDate(d.getDate()+amount);return L.iso(d);}
- const round=n=>Math.round((n+Number.EPSILON)*100)/100;
- function budgetStatus(c,key){
-  const s=L.stats({...c,key}),days=L.dates(key).length,mealBudget=s.buckets.meals.budget,otherBudget=s.buckets.other.budget;
+const round=L.round;
+ function budgetStatus(c,key,precomputed){
+  const s=precomputed??L.stats({...c,key}),days=L.dates(key).length,mealBudget=s.buckets.meals.budget,otherBudget=s.buckets.other.budget;
   const fixedReserve=round(Math.max(s.buckets.fixed.budget??0,L.fixedRows(c).reduce((n,x)=>n+Math.max(x.budget??0,x.actual??0),0)));
   const savings=c.budgets?c.budgets.savings:c.savingTarget;
   const configured=mealBudget!==null&&otherBudget!==null?round(mealBudget+otherBudget):null;
@@ -19,7 +19,7 @@
   entries.push({name:'其他',kind:'other',actual:others.some(x=>x.actual!==null)?others.reduce((n,x)=>n+(x.actual??0),0):null,budget:others.some(x=>x.budget!==null)?others.reduce((n,x)=>n+(x.budget??0),0):null,done:others.length>0&&others.every(x=>x.done)});
   const spent=Math.round(entries.reduce((n,x)=>n+(x.actual??0),0)*100)/100;
   const cycle=L.stats({...c,key:L.cycleKey(new Date(date+'T12:00:00'))});
-  const budgets=budgetStatus(c,L.cycleKey(new Date(date+'T12:00:00'))),mealSpent=round(d.meals.reduce((n,x)=>n+(x.actual??0),0));
+  const budgets=budgetStatus(c,L.cycleKey(new Date(date+'T12:00:00')),cycle),mealSpent=round(d.meals.reduce((n,x)=>n+(x.actual??0),0));
   const overspent=(budgets.dailyMealBudget!==null&&mealSpent>budgets.dailyMealBudget+0.000001)||(budgets.dailyTotalBudget!==null&&spent>Math.max(0,budgets.dailyTotalBudget)+0.000001);
   return {entries,spent,mealSpent,cycleSpent:cycle.spent,cycleBudget:cycle.budget,ratio:budgets.dailyMealBudget>0?mealSpent/budgets.dailyMealBudget*100:null,incomplete:cycle.unknown>0,...budgets,overspent};
  }

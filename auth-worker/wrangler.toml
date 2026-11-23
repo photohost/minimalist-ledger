@@ -11,3 +11,5 @@ routes = [
 [vars]
 SITE_ORIGIN = "https://blog.harunoji.one"
 GOOGLE_CLIENT_ID = "706785860796-s43aag5ai8d9tv132mo1j2oobuo57obt.apps.googleusercontent.com"
+# report-only：只記錄違規、不阻擋。確認正式網站無誤擋後改為 "enforce"。
+CSP_MODE = "report-only"

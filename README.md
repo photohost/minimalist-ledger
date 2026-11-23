@@ -9,7 +9,7 @@
 - 每日卡片提供早餐、午餐、晚餐、其他；只填實際金額，按儲存即記帳；無每日預算或完成勾選。空白表示未知，確認沒有花費填 0。
 - 00:00 依裝置本地時間自動翻到今天，從背景恢復時也會檢查。表單跨午夜仍存回原本日期。
 - 每個記帳週期為當月 5 日至次月 4 日。
-- 總覽採自然月七欄月曆，點日期開啟當日開銷清單，並可前往該日編輯。1～4 日屬前一記帳週期，以淡色虛線標示；月曆日期與期別統計的範圍不同。
+- 總覽月曆依記帳週期排列（5 日至次月 4 日），七欄對齊星期，點日期開啟當日開銷清單，並可前往該日編輯。月曆範圍與期別統計一致；落在次月的日期以淡色底標示。
 - 當日金額與月曆只包含三餐及其他；固定支出獨立統計。非今天灰色稿紙，當日三餐或總花費超出均分額度時優先紅色，標示超支並保留原字型。
 
 ## 固定支出：房租與訂閱
@@ -79,13 +79,11 @@
 
 Drive 授權過期後，可在 Google 帳號頁按「重新連線 Google」，繼續目前帳本。長效登入需要啟用同站登入服務，管理者可依 [登入服務部署指南](auth-worker/README.md) 設定。
 
-登入後每次儲存先寫入此瀏覽器，重新開啟並登入同一帳號後可取回待同步帳目。線上記帳通常在約 0.2 秒後開始同步，連續儲存會合併至下一次上傳。恢復連線時會比對 Drive 版本再補傳。版本衝突時保留本機與雲端帳目，等使用者確認。
+開啟網頁會直接顯示這個瀏覽器上次使用的帳本，登入檢查在背景進行，期間即可記帳；登出後下次開啟回到未登入的本機帳本。檢查點會記下雲端檔案版本，回到網頁時若 Drive 版本未變就不重新下載整本帳。登入後每次儲存先寫入此瀏覽器，重新開啟並登入同一帳號後可取回待同步帳目。線上記帳通常在約 0.2 秒後開始同步，連續儲存會合併至下一次上傳。恢復連線時會比對 Drive 版本再補傳。版本衝突時保留本機與雲端帳目，等使用者確認。
 
-新版使用 Google 官方授權，將帳目版本直接存進個人 Drive 的「日常留白記帳」資料夾，主網站不使用 Firebase。只申請 drive.file 與基本帳號權限，Token 僅留記憶體。每次同步新增帳目版本，不覆寫舊檔；雙裝置同時更新時可選版並保留所有來源。
+新版使用 Google 官方授權，將帳目版本直接存進個人 Drive 的「日常留白記帳」資料夾，主網站只使用 Google Drive 與 GitHub 兩種同步方式。只申請 drive.file 與基本帳號權限，Token 僅留記憶體。每次同步新增帳目版本，不覆寫舊檔；雙裝置同時更新時可選版並保留所有來源。上傳成功後會把超過 7 天、且不在最近 60 個版本內的舊快照移到 Drive 垃圾桶（每次最多 6 個），避免版本清單無限成長拖慢同步；垃圾桶仍保留 Drive 本身的還原期限。若某台裝置超過這個範圍未同步，讀取雲端時會要求先確認版本，不會自動覆蓋。
 
-需先啟用 Drive API 並設定網頁 OAuth Client ID，並完成真人授權才能驗證。完整設定、舊 Firebase 帳目匯出與限制：[GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md)。OAuth 用戶端 ID 由網站管理者統一填入 google-config.js；訪客只需按 Google 登入，不建立專案、不填 ID。未設定時會顯示登入尚未開放，不假裝已可使用。
-
-舊 Firebase 功能移至 firebase-legacy.html，僅供明確登入取回帳目；主頁不載入其 SDK。原 Firebase 指南保留為歷史資料，請勿拿 Firebase 設定貼到新的 Drive 連線欄位。
+需先啟用 Drive API 並設定網頁 OAuth Client ID，並完成真人授權才能驗證。完整設定與限制：[GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md)。OAuth 用戶端 ID 由網站管理者統一填入 google-config.js；訪客只需按 Google 登入，不建立專案、不填 ID。未設定時會顯示登入尚未開放，不假裝已可使用。
 
 ## 啟用 GitHub 儲存
 
@@ -119,10 +117,24 @@ npm start
 npm test
 ```
 
-部署檔案：index.html、style.css、paper.css、core.js、daily.js、insights.js、github-store.js、app.js。GitHub Settings → Pages → Deploy from a branch → main / (root)。以 Pages 成功部署結果確認，勿只根據預期網址宣稱完成。
+部署前先執行 `npm run build`，由 core.js、daily.js、insights.js、github-store.js、google-config.js、drive-store.js、app.js、google-sync.js 產生 app.bundle.js（網頁只載入這一支）。`npm test` 會檢查 app.bundle.js 是否為最新。
+
+部署檔案：index.html、app.bundle.js、sw.js、style.css、paper.css、privacy.html、ledger.webmanifest、圖示。新增檔案時記得一併加入 auth-worker/index.mjs 的 publicFiles 清單，否則 spending 網域會回 404。GitHub Settings → Pages → Deploy from a branch → main / (root)。以 Pages 成功部署結果確認，勿只根據預期網址宣稱完成。
+
+## 載入速度與離線
+
+網頁腳本合併為單一 app.bundle.js；帶 `?v=` 的資源由 auth-worker 加上一年期 immutable 快取，index.html、sw.js 與 manifest 則維持 `no-cache` 以便改版立即生效。
+
+sw.js 以註冊網址上的版本號命名快取：網頁本身走網路優先（離線才用快取），css／js／圖示等帶版本號的資源走快取優先。登入服務路徑 `/minimalist-ledger-auth/`、跨網域資源與 sw.js 自身一律不攔截。改版時 index.html 會註冊新版本號的 sw.js，啟用後自動刪除舊快取。manifest 維持 `display: browser`，因為 Google 登入採整頁轉址，獨立視窗模式在部分系統會跳出外部瀏覽器而拿不到登入 Cookie。
+
+## 安全標頭與內容安全政策
+
+auth-worker 為主站文件（index.html、privacy.html）加上 Content-Security-Policy、X-Frame-Options、Referrer-Policy 與 Permissions-Policy。腳本來源只允許自己與 Google 登入 SDK、Cloudflare 統計，因此注入的第三方腳本無法執行，也無法讀取記憶體中的 Google 或 GitHub 權杖。樣式保留 `'unsafe-inline'`，因為畫面範本以字串組出 style 屬性（金額圓點與分析長條）；這只放寬樣式，不影響腳本。
+
+`wrangler.toml` 的 `CSP_MODE` 預設為 `report-only`：違規只記錄在瀏覽器主控台，不阻擋。確認正式網站的主控台沒有誤擋（尤其是 Google 登入與 Drive 同步）後，再改為 `enforce`。政策定義在 `auth-worker/security.mjs`，由 `tests/security.test.cjs` 檢查。
 
 ## 字體
 
-使用 [Adobe 思源宋體](https://source.typekit.com/source-han-serif/tw/) 的繁體中文台灣可變 WOFF2 字體，優先本機已安裝字體，否則由 jsDelivr 載入 Adobe 官方開源檔案。初次載入須下載字型，未完成時暫用系統襯線字；之後由瀏覽器快取。字體遵循 Adobe 專案的 [SIL Open Font License](https://github.com/adobe-fonts/source-han-serif/blob/release/LICENSE.txt)。
+優先使用裝置已安裝的思源宋體／Noto Serif CJK；未安裝時由 Google Fonts 載入 [Noto Serif TC](https://fonts.google.com/noto/specimen/Noto+Serif+TC)（與思源宋體同源的開源宋體），依 unicode-range 分段下載，只取實際用到的字。樣式表以 `media="print"` 載入後再切換，不阻擋首次繪製；字型未就緒前暫用系統襯線字。字體遵循 [SIL Open Font License](https://github.com/notofonts/noto-cjk/blob/main/Serif/LICENSE)。
 
 原生日期挑選器等由作業系統繪製的視窗，外觀可能依裝置而異。v1.4 不含銀行串接、OAuth 登入或跨裝置自動合併。

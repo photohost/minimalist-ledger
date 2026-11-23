@@ -1,3 +1,5 @@
+import {isDocument,documentHeaders} from './security.mjs';
+
 const PATH = '/minimalist-ledger-auth';
 const SESSION_COOKIE = '__Secure-ledger-session';
 const FLOW_COOKIE = '__Secure-ledger-flow';
@@ -154,9 +156,9 @@ async function session(request,key,env,force) {
 }
 
 const SPENDING_ORIGIN='https://spending.harunoji.one';
-const publicFiles=new Set(['','index.html','privacy.html','firebase-legacy.html','style.css','paper.css','core.js','daily.js','insights.js','github-store.js','google-config.js','drive-store.js','app.js','google-sync.js','firebase-config.js','firebase-store.js','firebase-sync-legacy.js','ledger-icon-b.svg','ledger-b-32.png','ledger-b-180.png','ledger-b-192.png','ledger-b-512.png','ledger.webmanifest']);
+const publicFiles=new Set(['','index.html','privacy.html','sw.js','app.bundle.js','style.css','paper.css','core.js','daily.js','insights.js','github-store.js','google-config.js','drive-store.js','app.js','google-sync.js','ledger-icon-b.svg','ledger-b-32.png','ledger-b-180.png','ledger-b-192.png','ledger-b-512.png','ledger.webmanifest']);
 
-async function serveLedger(request,url){
+async function serveLedger(request,url,env){
   const file=url.pathname.slice(1);
   if(!publicFiles.has(file))return new Response('Not found',{status:404});
   if(!['GET','HEAD'].includes(request.method))return new Response(null,{status:405});
@@ -164,7 +166,17 @@ async function serveLedger(request,url){
   const version=url.searchParams.get('v');
   if(version&&/^[\w.-]{1,64}$/.test(version))upstream.searchParams.set('v',version);
   // Only public assets are requested upstream. Cookies and request headers stay on this origin.
-  return fetch(upstream.href,{method:request.method,redirect:'manual'});
+  const response=await fetch(upstream.href,{method:request.method,redirect:'manual'});
+  const headers=new Headers(response.headers);
+  // Pages are the only documents that run script; they get the policy. Everything else keeps its own headers.
+  if(isDocument(file)){
+    for(const [name,value] of Object.entries(documentHeaders(file,env.CSP_MODE)))headers.set(name,value);
+  }
+  // The page and the worker script must revalidate so a new release is picked up at once;
+  // everything addressed with ?v= never changes under that address.
+  if(file===''||file.endsWith('.html')||file==='sw.js'||file==='ledger.webmanifest')headers.set('Cache-Control','no-cache');
+  else if(version&&response.ok)headers.set('Cache-Control','public, max-age=31536000, immutable');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 }
 
 export default {
@@ -172,7 +184,7 @@ export default {
     const url=new URL(request.url);
     const origin=url.origin;
     if(origin!==env.SITE_ORIGIN&&origin!==SPENDING_ORIGIN)return json({error:'not_found'},404);
-    if(origin===SPENDING_ORIGIN&&!url.pathname.startsWith(PATH+'/'))return serveLedger(request,url);
+    if(origin===SPENDING_ORIGIN&&!url.pathname.startsWith(PATH+'/'))return serveLedger(request,url,env);
     const action=url.pathname.slice(PATH.length);
     if(!url.pathname.startsWith(PATH+'/')||!['/callback','/start','/session','/refresh','/logout'].includes(action))return json({error:'not_found'},404);
     if(action==='/callback'?request.method!=='GET':request.method!=='POST')return json({error:'method_not_allowed'},405);

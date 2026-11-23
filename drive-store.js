@@ -7,7 +7,7 @@
  function payload(data){const text=JSON.stringify(L.migrate(data));if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('帳目上限為 800 KB，請先匯出備份。');return text;}
  function message(e){return e?.message||'Google Drive 操作未完成，請稍後重試。';}
  class DriveStore{
-  constructor({token,user,clientId,expiresAt=0,fetchImpl=root.fetch,now=Date.now,refresh=null}){this.token=token;this.user=user;this.uid=user.uid;this.projectId=clientId;this.expiresAt=expiresAt;this.now=now;this.fetchImpl=fetchImpl.bind(root);this.revision=undefined;this.busy=false;this.folderId=null;this.pending=null;this.preferredId=null;this.acceptedContent=null;this.availableIds=[];this.refresh=refresh;this.renewing=null;this.disconnected=false;}
+  constructor({token,user,clientId,expiresAt=0,fetchImpl=root.fetch,now=Date.now,refresh=null,retention=null}){this.retention={keepDays:7,keepCount:60,maxDeletes:6,...(retention||{})};this.token=token;this.user=user;this.uid=user.uid;this.projectId=clientId;this.expiresAt=expiresAt;this.now=now;this.fetchImpl=fetchImpl.bind(root);this.revision=undefined;this.busy=false;this.folderId=null;this.pending=null;this.preferredId=null;this.acceptedContent=null;this.availableIds=[];this.refresh=refresh;this.renewing=null;this.disconnected=false;}
   expired(){return !this.token||(this.expiresAt&&this.now()>=this.expiresAt);}
   setAccess(token,expiresAt){this.token=token;this.expiresAt=expiresAt;}
   disconnect(){this.disconnected=true;this.token='';}
@@ -61,13 +61,16 @@
    const reachable=new Set(),remaining=heads.map(file=>file.id);
    while(remaining.length){const id=remaining.pop();if(reachable.has(id))continue;reachable.add(id);remaining.push(...(parentsById.get(id)||[]));}
    const extendsLocal=!this.revision||this.revision.split(',').every(id=>reachable.has(id));
-   return {heads,revision:heads.map(file=>file.id).join(','),extendsLocal};
+   return {heads,revision:heads.map(file=>file.id).join(','),extendsLocal,files};
   }
   async read(history){
    const {heads,revision,extendsLocal}=history??await this.history();
    if(!heads.length)return {revision,data:null};
    const file=heads.length===1?heads[0]:heads.find(head=>head.id===this.preferredId);
    if(!file)return {revision,data:null,conflicts:heads};
+   // Drive still reports the version we already hold: reuse it instead of downloading the ledger again.
+   const known=this.acceptedContent;
+   if(known&&known.id===file.id&&known.headRevisionId&&known.headRevisionId===file.headRevisionId)return {revision,data:JSON.parse(known.text),file,extendsLocal,unchanged:true};
    const text=await this.request('files/'+encodeURIComponent(file.id)+'?alt=media',{text:true});
    if(new TextEncoder().encode(text).length>MAX_BYTES)throw Error('Drive 帳目超過大小上限，未覆寫資料。');
    let data;
@@ -77,7 +80,8 @@
   accept(remote){
    if(remote.conflicts)throw Error('請先選擇衝突版本。');
    this.revision=remote.revision;
-   this.acceptedContent=remote.file?{id:remote.file.id,headRevisionId:remote.file.headRevisionId,text:JSON.stringify(remote.data)}:null;
+   const text=typeof remote.text==='string'?remote.text:remote.data===undefined||remote.data===null?null:JSON.stringify(remote.data);
+   this.acceptedContent=remote.file&&text!==null?{id:remote.file.id,headRevisionId:remote.file.headRevisionId,text}:null;
    this.pending=null;
   }
   async folder(){if(this.folderId)return this.folderId;const folders=await this.list("trashed = false and mimeType = 'application/vnd.google-apps.folder' and appProperties has { key='ledgerFolder' and value='minimalist-v1' }");if(folders.length)this.folderId=folders[0].id;else{const f=await this.request('files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'日常留白記帳',mimeType:'application/vnd.google-apps.folder',appProperties:{ledgerFolder:'minimalist-v1'}})});this.folderId=f.id;}return this.folderId;}
@@ -89,6 +93,24 @@
    const id=this.availableIds.shift();
    if(!id)throw Error('Drive 無法建立檔案 ID。');
    return id;
+  }
+  async prune(history,{keepDays,keepCount,maxDeletes}=this.retention){
+   // Every save adds a snapshot. Without this the file list grows for ever and each sync gets slower.
+   const files=history?.files||[];
+   if(history.heads.length!==1||files.length<=keepCount)return 0;
+   const time=file=>Date.parse(file.modifiedTime||'')||0;
+   const ordered=[...files].sort((a,b)=>time(b)-time(a));
+   const keep=new Set([...history.heads.map(file=>file.id),...ordered.slice(0,keepCount).map(file=>file.id)]);
+   if(this.acceptedContent)keep.add(this.acceptedContent.id);
+   const cutoff=this.now()-keepDays*86400000;
+   const stale=ordered.filter(file=>!keep.has(file.id)&&time(file)&&time(file)<cutoff).slice(-maxDeletes);
+   let removed=0;
+   for(const file of stale){
+    // Trash keeps Drive's own 30-day recovery; a failure here must never fail the save.
+    try{await this.request('files/'+encodeURIComponent(file.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});}catch{break;}
+    removed++;
+   }
+   return removed;
   }
   async save(data,{baseText}={}){
    if(this.busy)throw Error('上一筆 Drive 儲存尚未完成。');
@@ -135,6 +157,7 @@
      if(JSON.stringify(remote.data)!==text)throw Error('Drive 上傳後的帳目已有變更，本機版本仍保留。');
     }
     this.accept({revision:id,data:JSON.parse(text),file});
+    try{await this.prune(latest);}catch{}
    }finally{this.busy=false;}
   }
 
