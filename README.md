@@ -1,6 +1,6 @@
-# 日常留白 · 極簡個人記帳 v1.8.7
+# 日常留白 · 極簡個人記帳 v1.10.0
 
-手機優先的每日翻頁卡片，搭配五個書籤：記帳、總覽、分析、設定、關於。使用格子稿紙背景與 Adobe 思源宋體繁體中文台灣字型；網頁原始碼公開，實際帳目可儲存到私人 GitHub 倉庫。
+手機優先的每日翻頁卡片，搭配五個書籤：記帳、總覽、分析、設定、關於。使用格子稿紙背景與 Adobe 思源宋體繁體中文台灣字型；網頁原始碼公開；帳目只存在你的瀏覽器與你自己的 Google Drive，GitHub 只放程式碼。
 
 ## 每日與月曆
 
@@ -65,7 +65,7 @@
 - 已知付款日保留；原本沒有日期的紀錄保留為未指定日期，顯示在設定的舊支出區，不自行補日期。
 - 尚未設定四類預算的舊週期暫沿用原明細預算；開啟預算設定可檢視並自行調整為四類預算。
 
-請不要在新舊程式分頁同時修改同一帳目。部署新版後關閉舊頁，重新開啟並視需要重新連線 GitHub。
+請不要在新舊程式分頁同時修改同一帳目。部署新版後關閉舊頁，重新開啟後重新登入 Google。
 
 ## 同步狀態提示
 
@@ -81,29 +81,20 @@ Drive 授權過期後，可在 Google 帳號頁按「重新連線 Google」，�
 
 開啟網頁會直接顯示這個瀏覽器上次使用的帳本，登入檢查在背景進行，期間即可記帳；登出後下次開啟回到未登入的本機帳本。檢查點會記下雲端檔案版本，回到網頁時若 Drive 版本未變就不重新下載整本帳。登入後每次儲存先寫入此瀏覽器，重新開啟並登入同一帳號後可取回待同步帳目。線上記帳通常在約 0.2 秒後開始同步，連續儲存會合併至下一次上傳。恢復連線時會比對 Drive 版本再補傳。版本衝突時保留本機與雲端帳目，等使用者確認。
 
-新版使用 Google 官方授權，將帳目版本直接存進個人 Drive 的「日常留白記帳」資料夾，主網站只使用 Google Drive 與 GitHub 兩種同步方式。只申請 drive.file 與基本帳號權限，Token 僅留記憶體。每次同步新增帳目版本，不覆寫舊檔；雙裝置同時更新時可選版並保留所有來源。上傳成功後會把超過 7 天、且不在最近 60 個版本內的舊快照移到 Drive 垃圾桶（每次最多 6 個），避免版本清單無限成長拖慢同步；垃圾桶仍保留 Drive 本身的還原期限。若某台裝置超過這個範圍未同步，讀取雲端時會要求先確認版本，不會自動覆蓋。
+新版使用 Google 官方授權，將帳目版本直接存進個人 Drive 的「日常留白記帳」資料夾，主網站只使用 Google Drive 同步帳目；GitHub 只放網站程式碼，不儲存任何帳目。只申請 drive.file 與基本帳號權限，Token 僅留記憶體。每次同步新增帳目版本，不覆寫舊檔；雙裝置同時更新時可選版並保留所有來源。上傳成功後會把超過 7 天、且不在最近 60 個版本內的舊快照移到 Drive 垃圾桶（每次最多 6 個），避免版本清單無限成長拖慢同步；垃圾桶仍保留 Drive 本身的還原期限。若某台裝置超過這個範圍未同步，讀取雲端時會要求先確認版本，不會自動覆蓋。
 
 需先啟用 Drive API 並設定網頁 OAuth Client ID，並完成真人授權才能驗證。完整設定與限制：[GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md)。OAuth 用戶端 ID 由網站管理者統一填入 google-config.js；訪客只需按 Google 登入，不建立專案、不填 ID。未設定時會顯示登入尚未開放，不假裝已可使用。
 
-## 啟用 GitHub 儲存
+## 小光 AI 點評
 
-- 公開程式：photohost/minimalist-ledger。
-- 私人資料：photohost/minimalist-ledger-data，預設分支的 ledger.json。
+分析頁最上方有吉祥物「小光」的對話區。登入 Google 且本期有花費時，按「請小光點評」，小光會依收入、儲蓄、預算與花費，用 100 字內點出該省的地方、哪一天哪一類花太多，記帳狀況良好時也會稱讚。
 
-1. 在 https://github.com/settings/personal-access-tokens/new 建立 Fine-grained token。此步由本人操作，不要把權杖貼到聊天或提交至倉庫。
-2. Resource owner 選你的帳號，設定有效期限。Repository access 選 Only select repositories，只勾選私人資料倉庫。
-3. Repository permissions 的 Contents 選 Read and write；Metadata 保持必要的唯讀權限。不要授權網站程式或其他倉庫。
-4. 正式 HTTPS 網站的設定書籤 → GitHub 儲存，確認帳號與資料倉庫名稱，貼入權杖後連線。
-5. 第一次選上傳此裝置帳目；換裝置先下載 GitHub 帳目。版本不同會要求選擇，取代前下載舊版本備份。
-6. 後續儲存先留本機副本，約 1.2 秒後上傳。只有顯示「已同步至 GitHub」才代表完成。
-
-權杖只在本頁記憶體，不寫入帳目、備份或瀏覽器儲存。重新整理或關閉後需重新輸入；Codex 的 GitHub 連線不會成為網頁的登入權限。僅支援 HTTPS 或本機 localhost HTTP。
-
-GitHub Pages 只提供網頁，並非資料後端；同步由網頁呼叫 GitHub Contents API 完成。上傳會核對檔案 SHA 並確認倉庫為私人；衝突時停止自動上傳，不會自動合併。離線、權限錯誤或結果不明時保留本機副本。
-
-帳目檔案上限 900 KB；Git 歷史保留舊版本。私人倉庫不代表端對端加密，具存取權者與 GitHub 可讀取內容，請勿改為公開。
-
-參考：[GitHub 權杖文件](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)、[Contents API](https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28)。
+- 提示詞（小光的個性與規則）寫在 `auth-worker/review.mjs`，只在伺服器端，前端無法改動。
+- 模型為 Cloudflare Workers AI 的 Qwen3.8 27B（關閉思考模式），逾時或沒有內容時改用 Llama 3.3 70B。
+- 只送出彙總：期間、收入、各類預算與實際金額、超支日、花費最高的三天、其他分類前五名。不送備註、訂閱名稱、帳號或 Email。
+- 需要有效登入（Worker 的加密 Cookie）；同一位使用者 8 秒內只能請求一次，單次請求上限 6 KB。
+- 點評結果只快取在這個瀏覽器，每個帳本最多保留最近 6 期；帳目改動後會標示「這是更新前的點評」。
+- 這是 AI 產生的評論，僅供參考。`wrangler.toml` 需有 `[ai] binding = "AI"`。
 
 ## 備份與本機
 
@@ -117,7 +108,7 @@ npm start
 npm test
 ```
 
-部署前先執行 `npm run build`，由 core.js、daily.js、insights.js、github-store.js、google-config.js、drive-store.js、app.js、google-sync.js 產生 app.bundle.js（網頁只載入這一支）。`npm test` 會檢查 app.bundle.js 是否為最新。
+部署前先執行 `npm run build`，由 core.js、daily.js、insights.js、ai.js、google-config.js、drive-store.js、app.js、google-sync.js 產生 app.bundle.js（網頁只載入這一支）。`npm test` 會檢查 app.bundle.js 是否為最新。
 
 部署檔案：index.html、app.bundle.js、sw.js、style.css、paper.css、privacy.html、ledger.webmanifest、圖示。新增檔案時記得一併加入 auth-worker/index.mjs 的 publicFiles 清單，否則 spending 網域會回 404。GitHub Settings → Pages → Deploy from a branch → main / (root)。以 Pages 成功部署結果確認，勿只根據預期網址宣稱完成。
 

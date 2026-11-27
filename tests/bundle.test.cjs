@@ -11,7 +11,7 @@ test('網頁、Service Worker 與 package.json 使用同一版本號',()=>{
  assert.ok(html.includes('app.bundle.js?v='+build.version));
  assert.ok(html.includes('style.css?v='+build.version));
  assert.ok(html.includes('paper.css?v='+build.version));
- assert.equal(/\?v=(?!1\.9\.0\b)[\d.]+/.test(html),false);
+ assert.equal(new RegExp('\\?v=(?!'+build.version.replace(/\./g,'\\.')+'\\b)[\\d.]+').test(html),false);
  assert.ok(build.build().includes("register('sw.js?v="+build.version+"')"));
 });
 
@@ -42,7 +42,7 @@ test('合併後的 app.bundle.js 能直接啟動、繪製月曆並記帳',()=>{
   setTimeout,clearTimeout,console
  });
  vm.runInContext(fs.readFileSync(require.resolve('../'+build.OUTPUT),'utf8'),context,{filename:build.OUTPUT});
- assert.ok(vm.runInContext('typeof Ledger==="object"&&typeof DailyLedger==="object"&&typeof GitHubLedger==="object"&&typeof GoogleLedger==="object"',context));
+ assert.ok(vm.runInContext('typeof Ledger==="object"&&typeof DailyLedger==="object"&&typeof GoogleLedger==="object"',context));
  vm.runInContext("currentView='overview';render()",context);
  assert.ok(elements.get('#calendar').innerHTML.includes('data-day='));
  assert.equal(vm.runInContext('KEY',context),'minimalist-ledger-v1');

@@ -3,7 +3,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {version}=require('./package.json');
-const SOURCES=['core.js','daily.js','insights.js','github-store.js','google-config.js','drive-store.js','app.js','google-sync.js'];
+const SOURCES=['core.js','daily.js','insights.js','ai.js','google-config.js','drive-store.js','app.js','google-sync.js'];
 const OUTPUT='app.bundle.js';
 function build(){
  const parts=SOURCES.map(name=>'// --- '+name+' ---\n'+fs.readFileSync(path.join(__dirname,name),'utf8').trim()+'\n');

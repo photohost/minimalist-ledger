@@ -68,7 +68,7 @@ window.LEDGER_GOOGLE_CONFIG = {
 
 ## 舊資料移轉
 
-- 本機／GitHub：先下載最新帳目到本機並匯出備份，再登入 Drive，按匯入原本帳目。
+- 本機：先匯出備份，再登入 Drive，按匯入原本帳目。
 - Firebase 版本已於 1.9.0 移除，舊匯出頁不再提供。尚未移轉的 Firebase 帳目請在移除前自行匯出，或在 Firebase 主控台保留原資料；本網站不會自動刪除或搬移它們。
 
 ## Drive 中的檔案與同步
@@ -89,7 +89,7 @@ window.LEDGER_GOOGLE_CONFIG = {
 - 登出是斷開本網站的 Drive 連線，不會登出整個瀏覽器的 Google 帳號。若要撤銷應用程式權限，可至 https://myaccount.google.com/connections 管理。
 - 每次儲存先將帳目寫到同一瀏覽器的本機儲存，按 Google 帳號隔離。關頁、重新整理或登出後，登入同一帳號即可取回。清除網站資料或結束無痕工作階段可能移除尚未同步的本機資料。
 - 網站開著時可離線儲存。重連時會核對 Drive 版本再補傳。已關閉的網站要等重新開啟並登入才會同步。雲端版本若已變更或暫時讀到較舊版本，會先保留本機資料，等你確認再處理。
-- GitHub 與 Drive 擇一自動同步，登入 Drive 會停止 GitHub 上傳。
+- 帳目只同步到 Google Drive；網站已移除 GitHub 帳目上傳。
 
 ## 排查
 

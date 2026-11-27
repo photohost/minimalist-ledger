@@ -9,9 +9,9 @@ test('主站政策不允許 eval、行內腳本與任意來源的腳本',async()
  assert.ok(!/script-src[^;]*'unsafe-inline'/.test(p));
 });
 
-test('主站政策涵蓋 Google 登入、Drive、GitHub 與字型所需的來源',async()=>{
+test('主站政策涵蓋 Google 登入、Drive 與字型所需的來源',async()=>{
  const s=await load(),p=s.policyFor('index.html');
- for(const origin of ['https://accounts.google.com','https://www.googleapis.com','https://openidconnect.googleapis.com','https://api.github.com','https://fonts.gstatic.com','https://fonts.googleapis.com'])
+ for(const origin of ['https://accounts.google.com','https://www.googleapis.com','https://openidconnect.googleapis.com','https://fonts.gstatic.com','https://fonts.googleapis.com'])
   assert.ok(p.includes(origin),origin);
  assert.ok(p.includes("frame-ancestors 'none'"));
  assert.ok(p.includes("object-src 'none'"));
@@ -51,4 +51,10 @@ test('頁面不含行內事件處理器，所有腳本以外部檔案載入',()=
 test('打包的程式碼不使用 eval 或動態函式建立',()=>{
  const bundle=fs.readFileSync(require.resolve('../app.bundle.js'),'utf8');
  assert.equal(/\beval\(|new Function\(|setTimeout\(\s*['"`]/.test(bundle),false);
+});
+
+test('帳目只存 Google Drive：政策與程式碼不再連到 GitHub API',async()=>{
+ const s=await load();
+ assert.ok(!s.policyFor('index.html').includes('github'));
+ for(const file of ['app.js','google-sync.js','index.html'])assert.ok(!/api\.github\.com|GitHubStore|GitHubLedger/.test(fs.readFileSync(__dirname+'/../'+file,'utf8')),file);
 });

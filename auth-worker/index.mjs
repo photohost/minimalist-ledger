@@ -1,4 +1,5 @@
 import {isDocument,documentHeaders} from './security.mjs';
+import {MAX_BODY,validateSummary,runReview} from './review.mjs';
 
 const PATH = '/minimalist-ledger-auth';
 const SESSION_COOKIE = '__Secure-ledger-session';
@@ -156,7 +157,7 @@ async function session(request,key,env,force) {
 }
 
 const SPENDING_ORIGIN='https://spending.harunoji.one';
-const publicFiles=new Set(['','index.html','privacy.html','sw.js','app.bundle.js','style.css','paper.css','core.js','daily.js','insights.js','github-store.js','google-config.js','drive-store.js','app.js','google-sync.js','ledger-icon-b.svg','ledger-b-32.png','ledger-b-180.png','ledger-b-192.png','ledger-b-512.png','ledger.webmanifest']);
+const publicFiles=new Set(['','index.html','privacy.html','sw.js','app.bundle.js','style.css','paper.css','core.js','daily.js','insights.js','ai.js','xiaoguang.png','google-config.js','drive-store.js','app.js','google-sync.js','ledger-icon-b.svg','ledger-b-32.png','ledger-b-180.png','ledger-b-192.png','ledger-b-512.png','ledger.webmanifest']);
 
 async function serveLedger(request,url,env){
   const file=url.pathname.slice(1);
@@ -179,6 +180,26 @@ async function serveLedger(request,url,env){
   return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 }
 
+// 小光點評：需要有效登入；每位使用者短時間內只能請求一次（單一執行個體內的盡力限制）。
+const lastReview=new Map();
+async function review(request,key,env){
+  const active=await unseal(request,SESSION_COOKIE,key);
+  if(!active)return json({error:'sign_in_required'},401);
+  if(!env.AI)return json({error:'ai_unavailable'},503);
+  const text=await request.text();
+  if(text.length>MAX_BODY)return json({error:'too_large'},413);
+  let summary;
+  try{summary=validateSummary(JSON.parse(text));}catch{return json({error:'bad_request'},400);}
+  const uid=active.user.uid,now=Date.now();
+  if(now-(lastReview.get(uid)||0)<8000)return json({error:'too_many_requests'},429);
+  lastReview.set(uid,now);
+  if(lastReview.size>500)for(const [id,at] of lastReview)if(now-at>60000)lastReview.delete(id);
+  try{
+    const reply=await runReview(env.AI,summary);
+    return reply?json({reply}):json({error:'empty_reply'},502);
+  }catch{return json({error:'ai_unavailable'},503);}
+}
+
 export default {
   async fetch(request,env) {
     const url=new URL(request.url);
@@ -186,7 +207,7 @@ export default {
     if(origin!==env.SITE_ORIGIN&&origin!==SPENDING_ORIGIN)return json({error:'not_found'},404);
     if(origin===SPENDING_ORIGIN&&!url.pathname.startsWith(PATH+'/'))return serveLedger(request,url,env);
     const action=url.pathname.slice(PATH.length);
-    if(!url.pathname.startsWith(PATH+'/')||!['/callback','/start','/session','/refresh','/logout'].includes(action))return json({error:'not_found'},404);
+    if(!url.pathname.startsWith(PATH+'/')||!['/callback','/start','/session','/refresh','/logout','/review'].includes(action))return json({error:'not_found'},404);
     if(action==='/callback'?request.method!=='GET':request.method!=='POST')return json({error:'method_not_allowed'},405);
     if(action!=='/callback'&&request.headers.get('Origin')!==origin)return json({error:'forbidden'},403);
     if(action==='/logout')return json({},200,[cookie(SESSION_COOKIE,'',0),cookie(FLOW_COOKIE,'',0)]);
@@ -197,6 +218,7 @@ export default {
       const key=await crypto.subtle.importKey('raw',bytes,'AES-GCM',false,['encrypt','decrypt']);
       if(action==='/start')return await begin(key,env,origin);
       if(action==='/callback')return await callback(request,url,key,env,origin);
+      if(action==='/review')return await review(request,key,env);
       return await session(request,key,env,action==='/refresh');
     }catch{return json({error:'temporarily_unavailable'},503);}
   }

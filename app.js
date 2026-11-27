@@ -1,4 +1,4 @@
-/* 日常留白 — GitHub private-repository sync; no external dependencies. */
+/* 日常留白 — local-first ledger with Google Drive sync; no external dependencies. */
 'use strict';
 const L=Ledger, $=s=>document.querySelector(s), LOCAL_KEY='minimalist-ledger-v1', ACCOUNT_KEY='minimalist-ledger-account';
 // 字型樣式表以 media=print 非阻塞載入；腳本在此切換生效（取代內嵌 onload，以符合 CSP）。
@@ -11,7 +11,7 @@ let selectedDate=L.iso(new Date()),editingCycle=selected;
 let currentView='daily';
 const D=DailyLedger;
 const I=LedgerInsights;
-let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
+const AI=LedgerAI;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statusLabels={login:'登入中',guest:'未登入',syncing:'雲端同步中',pending:'雲端尚未同步',latest:'雲端均最新'};
@@ -23,7 +23,7 @@ function syncText(element,message,phase=''){
  element.innerHTML='<span class="sync-coin is-'+phase+'" role="img" aria-label="'+label+'">'+Array.from(label).map((letter,index)=>'<span class="coin-letter" aria-hidden="true" style="--coin-index:'+index+'">'+letter+'</span>').join('')+'</span>'+(detail?'<span class="sync-detail"> · '+esc(detail)+'</span>':'');
 }
 function syncBadge(phase=''){
- if(!phase)phase=googleMode||cloudClient?'pending':'guest';
+ if(!phase)phase=googleMode?'pending':'guest';
  if(phase===badgeState)return;
  badgeState=phase;
  syncText($('#syncBadge'),statusLabels[phase],phase);
@@ -91,7 +91,39 @@ function renderAnalysis(){
  $('#categoryTable').innerHTML=a.categories.length?`<table><caption>其他支出分類</caption><thead><tr><th>分類</th><th>實際金額</th></tr></thead><tbody>${a.categories.map(x=>`<tr><td>${esc(x.name)}</td><td>NT$ ${money(x.spent)}</td></tr>`).join('')}</tbody></table>`:'<p class="empty-state">尚無「其他」分類消費，記帳後即時更新。</p>';
  $('#analysisNote').textContent=`${selected} · ${s.unknown?'預算尚未設定完整；':''}僅統計實際輸入的消費，不含儲蓄。`;
  $('#analysisMonth').value=selected;
+ renderAi();
 }
+// 小光點評：只送彙總（金額、日期、分類），結果只存在這個瀏覽器。
+let aiBusy=false,aiError='';
+const aiCacheKey=()=>KEY+'-xiaoguang';
+function aiSaved(){try{return JSON.parse(localStorage.getItem(aiCacheKey())||'{}');}catch{return {};}}
+function aiSave(cycleKey,entry){try{const all=aiSaved();all[cycleKey]=entry;const keys=Object.keys(all).sort().slice(-6);localStorage.setItem(aiCacheKey(),JSON.stringify(Object.fromEntries(keys.map(k=>[k,all[k]]))));}catch{}}
+const botBubble=text=>`<div class="chat-row bot"><img class="chat-avatar" src="xiaoguang.png" alt="" width="44" height="44"><div class="chat-body"><span class="chat-name">小光</span><p class="chat-bubble">${esc(text)}</p></div></div>`;
+const meBubble=text=>`<div class="chat-row me"><p class="chat-bubble">${esc(text)}</p></div>`;
+function renderAi(){
+ const box=$('#aiThread');if(!box)return;
+ const summary=AI.buildSummary(cycle(),selected,L.iso(new Date())),print=AI.fingerprint(summary),saved=aiSaved()[selected],ask=$('#aiAsk');
+ let html;
+ if(aiBusy)html=meBubble('幫我點評這期開銷')+'<div class="chat-row bot"><img class="chat-avatar" src="xiaoguang.png" alt="" width="44" height="44"><div class="chat-body"><span class="chat-name">小光</span><p class="chat-bubble typing" aria-label="小光正在看帳"><i></i><i></i><i></i></p></div></div>';
+ else if(!AI.hasData(summary))html=botBubble('這期還沒有花費可以點評。先記幾筆，我再來挑毛病。');
+ else if(aiError)html=meBubble('幫我點評這期開銷')+botBubble(aiError);
+ else if(saved)html=meBubble('幫我點評這期開銷')+botBubble(saved.reply)+(saved.print===print?'':'<p class="chat-stale">帳目已更新，這是更新前的點評。</p>');
+ else html=botBubble(googleMode?'想知道我怎麼看這期的帳？按下面的按鈕，我會挑出該省的地方。':'登入 Google 之後，我才能幫你點評這期的帳。');
+ box.innerHTML=html;
+ ask.disabled=aiBusy||!googleMode||!AI.hasData(summary);
+ ask.textContent=aiBusy?'小光看帳中…':saved?'重新點評':'請小光點評';
+ box.scrollTop=box.scrollHeight;
+}
+async function askAi(){
+ if(aiBusy||!googleMode)return;
+ const cycleKey=selected,summary=AI.buildSummary(cycle(),cycleKey,L.iso(new Date()));
+ if(!AI.hasData(summary))return;
+ aiBusy=true;aiError='';renderAi();
+ try{aiSave(cycleKey,{print:AI.fingerprint(summary),reply:await AI.requestReview(summary)});}
+ catch(e){aiError=e.message||'小光暫時無法點評，請稍後再試。';}
+ finally{aiBusy=false;if(currentView==='analysis')renderAi();}
+}
+$('#aiAsk').onclick=askAi;
 function show(title,body,onSave){if(accountSwitching){toast("正在切換帳號，請稍候。");return;}editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
 function num(label,id,value,fieldClass=''){
  const legacy=value!=null&&!Number.isInteger(value);
@@ -201,7 +233,7 @@ $('#export').onclick=()=>download(blocked?(raw||JSON.stringify(state)):JSON.stri
 $('#import').onclick=()=>$('#file').click();$('#file').onchange=async e=>{const file=e.target.files[0];if(!file)return;const importKey=KEY,importRaw=raw;try{if(file.size>10*1024*1024)throw Error('備份上限為 10 MB。');const candidate=L.validate(JSON.parse(await file.text()));if(KEY!==importKey||raw!==importRaw)throw Error('帳號或帳目已變更，請重新選擇備份。');if(!confirm(`備份包含 ${Object.keys(candidate.cycles).length} 個週期。匯入會取代所有目前帳目；系統會先下載目前資料備份。確定匯入？`))return;
  if(raw!==null)download(raw,`minimalist-before-import-${Date.now()}.json`);
  const previousBlocked=blocked;blocked=false;try{commit(candidate);}catch(err){blocked=previousBlocked;throw err;}render();toast('備份已匯入。');}catch(err){toast(err.message||'匯入失敗，原資料保持不變。');}finally{e.target.value='';}};
-window.addEventListener('storage',e=>{if(e.key===KEY){cloudAuto=false;clearTimeout(cloudTimer);if(cloudClient)cloudText('另一分頁已變更帳目 · 自動上傳已暫停，請重新整理',true);toast('另一分頁已變更資料，請重新整理後繼續。');$('#saveStatus').textContent='資料已在另一分頁變更，請重新整理';}});
+window.addEventListener('storage',e=>{if(e.key===KEY){toast('另一分頁已變更資料，請重新整理後繼續。');$('#saveStatus').textContent='資料已在另一分頁變更，請重新整理';}});
 function renderDaily(){
  const key=L.cycleKey(new Date(selectedDate+'T12:00:00')),c=state.cycles[key]||L.defaults(),s=D.summary(c,selectedDate),date=new Date(selectedDate+'T12:00:00');
  $('#dayTitle').textContent=`${date.getMonth()+1} 月 ${date.getDate()} 日`;
@@ -241,65 +273,8 @@ window.addEventListener('focus',()=>dayWatcher.check());document.addEventListene
 render();
 if(blocked)toast('無法讀取本機帳目，請到「設定」匯出原始資料或匯入有效備份。');
 
-function cloudText(message,error=false,phase=''){if(error&&!phase)phase='pending';syncText($('#cloudStatus'),message,phase);syncText($('#cloudMessage'),message,phase);if(!googleMode)syncBadge(phase);$('#cloudStatus').classList.toggle('error',error);if(error)toast(message);}
-function cloudControls(){for(const id of ['cloudConnect','cloudPull','cloudPush','cloudDisconnect'])$('#'+id).disabled=cloudBusy;$('#cloudForm').hidden=!!cloudClient;$('#cloudActions').hidden=!cloudClient;}
 function currentJSON(){return JSON.stringify(state);}
 function queueCloud(){
  if(googleMode){googleQueue();return;}
- if(!cloudClient||!cloudAuto){if(cloudClient)cloudText('已存本機，尚未啟用自動上傳。',false,'pending');else syncBadge('pending');return;}
- clearTimeout(cloudTimer);cloudText('已存本機 · 等待上傳 GitHub',false,'pending');
- cloudTimer=setTimeout(flushCloud,1200);
+ syncBadge('pending');
 }
-async function flushCloud(){
- if(!cloudClient||!cloudAuto||cloudBusy)return;
- const snapshot=currentJSON();cloudBusy=true;cloudControls();cloudText('已存本機 · 正在上傳 GitHub…',false,'syncing');
- try{if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto&&snapshot===currentJSON())cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}),false,'latest');}
- catch(e){cloudAuto=false;$('#cloudRetry').hidden=false;cloudText('僅存本機 · '+e.message,true);}
- finally{cloudBusy=false;cloudControls();if(cloudAuto&&currentJSON()!==cloudSynced)queueCloud();}
-}
-function guardCloud(){if(googleMode||accountSwitching)throw Error('請先登出 Google，再使用 GitHub。');if(cloudBusy)throw Error('GitHub 正在處理上一個操作，請稍候。');if(!cloudClient)throw Error('請先連線 GitHub。');if($('#editor').open)throw Error('請先儲存或關閉目前的編輯視窗。');}
-$('#cloudOpen').onclick=()=>{$('#cloud').showModal();cloudControls();};
-$('#cloudClose').onclick=()=>{$('#cloudToken').value='';$('#cloud').close();};
-$('#cloud').addEventListener('close',()=>{$('#cloudToken').value='';});
-$('#cloudForm').onsubmit=async e=>{
- e.preventDefault();if(googleMode||accountSwitching){cloudText('請先登出 Google，再使用 GitHub。',true);return;}if(cloudBusy)return;cloudBusy=true;cloudControls();cloudText('正在檢查私人資料倉庫…');
- let client;
- try{
-  if(location.protocol!=='https:'&&!['127.0.0.1','localhost'].includes(location.hostname))throw Error('請使用 HTTPS 正式網站連線 GitHub。');
-  client=new GitHubLedger.GitHubStore({owner:$('#cloudOwner').value.trim(),repo:$('#cloudRepo').value.trim(),token:$('#cloudToken').value.trim()});
-  $('#cloudToken').value='';const remote=await client.read();cloudClient=client;
-  if(!blocked&&remote.data&&JSON.stringify(remote.data)===currentJSON()){client.accept(remote);cloudAuto=true;cloudSynced=currentJSON();cloudText('已同步至 GitHub · 帳目版本一致',false,'latest');}
-  else cloudText(remote.data?'已連線 · 請選擇下載 GitHub 帳目，或上傳此裝置帳目。':'已連線 · 倉庫尚無帳目，請按「上傳此裝置帳目」開始自動儲存。');
- }catch(err){client?.disconnect();cloudText(err.message,true);}finally{$('#cloudToken').value='';cloudBusy=false;cloudControls();}
-};
-async function pullCloud(){
- try{
-  guardCloud();cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在讀取 GitHub 帳目…',false,'syncing');const before=raw,remote=await cloudClient.read();
-  if(!remote.data)throw Error('GitHub 尚無 ledger.json，請先上傳此裝置帳目。');
-  if(raw!==before)throw Error('本機帳目剛有變更，請重新下載以確認版本。');
-  if(!confirm('下載會取代此裝置目前帳目，並先匯出本機備份。確定使用 GitHub 版本？')){cloudText('已取消下載 · 自動上傳暫停，請重新選擇帳目版本');return;}
-  if(raw!==null)download(raw,`minimalist-before-github-${Date.now()}.json`);
-  const wasBlocked=blocked;blocked=false;try{commit(remote.data,true);}catch(err){blocked=wasBlocked;throw err;}
-  cloudClient.accept(remote);cloudSynced=currentJSON();cloudAuto=true;$('#cloudRetry').hidden=true;render();cloudText('已下載 GitHub 帳目 · 後續儲存將自動上傳',false,'latest');
- }catch(e){cloudText('下載未完成 · '+e.message,true);}finally{cloudBusy=false;cloudControls();}
-}
-async function uploadCloud(){
- try{
-  guardCloud();if(blocked)throw Error('本機資料無法讀取，請先匯入有效備份或下載 GitHub 帳目。');
-  cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在核對 GitHub 帳目…',false,'syncing');const before=raw,remote=await cloudClient.read();
-  if(raw!==before)throw Error('本機帳目剛有變更，請重新上傳以確認版本。');
-  if(remote.data&&JSON.stringify(remote.data)!==currentJSON()){
-   if(!confirm('GitHub 上有不同版本。上傳將取代該版本，並先下載 GitHub 舊版本備份。確定使用此裝置帳目？')){cloudText('已取消上傳 · 自動上傳暫停，請重新選擇帳目版本');return;}
-   download(JSON.stringify(remote.data,null,2),`minimalist-github-before-replace-${Date.now()}.json`);
-  }
-  cloudClient.accept(remote);cloudAuto=true;cloudText('準備上傳 GitHub…');
- }catch(e){cloudText('上傳未完成 · '+e.message,true);}finally{cloudBusy=false;cloudControls();}
- if(cloudAuto)await flushCloud();
-}
-$('#cloudPull').onclick=pullCloud;$('#cloudPush').onclick=uploadCloud;$('#cloudRetry').onclick=uploadCloud;
-$('#cloudDisconnect').onclick=()=>{
- if(cloudBusy)return;
- if(cloudAuto&&cloudSynced!==currentJSON()&&!confirm('尚有帳目未上傳，資料會留在本機。確定中斷連線？'))return;
- clearTimeout(cloudTimer);cloudAuto=false;cloudClient?.disconnect();cloudClient=null;cloudSynced=null;$('#cloudRetry').hidden=true;cloudControls();cloudText('GitHub 已中斷 · 帳目目前僅存於本機');
-};
-window.addEventListener('beforeunload',e=>{if(cloudClient&&cloudSynced!==currentJSON()){e.preventDefault();e.returnValue='';}});

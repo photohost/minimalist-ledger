@@ -41,7 +41,7 @@ function browser({ local = new Map([[localKey, JSON.stringify(data(123))]]), ses
     }
   };
   const context = vm.createContext({
-    Ledger: L, DailyLedger: require('../daily.js'), LedgerInsights: require('../insights.js'), GoogleLedger: { ...G, connect: async () => connection }, connection, exports,
+    Ledger: L, DailyLedger: require('../daily.js'), LedgerInsights: require('../insights.js'), LedgerAI: require('../ai.js'), GoogleLedger: { ...G, connect: async () => connection }, connection, exports,
     document: { querySelector(key) { if (!elements.has(key)) elements.set(key, element()); return elements.get(key); } },
     localStorage: storage(local), sessionStorage: storage(session), window, Intl, Date, JSON, Error, setTimeout, clearTimeout, confirm: () => true
   });

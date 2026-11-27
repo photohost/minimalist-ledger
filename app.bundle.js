@@ -1,5 +1,5 @@
 'use strict';
-/* 日常留白 1.9.0 · 由 build.cjs 產生，請勿直接編輯。 */
+/* 日常留白 1.10.0 · 由 build.cjs 產生，請勿直接編輯。 */
 // --- core.js ---
 (function(root){
  'use strict';
@@ -146,52 +146,65 @@ const round=L.round;
  const api={analyze,monthDates};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.LedgerInsights=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
-// --- github-store.js ---
+// --- ai.js ---
 (function(root){
  'use strict';
  const L=typeof module!=='undefined'&&module.exports?require('./core.js'):root.Ledger;
- const encode=text=>{const bytes=new TextEncoder().encode(text);let binary='';for(const b of bytes)binary+=String.fromCharCode(b);return btoa(binary);};
- const decode=base64=>new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(base64.replace(/\s/g,'')),c=>c.charCodeAt(0)));
- class GitHubStore{
-  constructor({owner,repo,token,fetchImpl=fetch}){
-   if(!/^[a-z\d](?:[a-z\d-]{0,38})$/i.test(owner)||!/^[\w.-]{1,100}$/.test(repo))throw Error('請填寫有效的 GitHub 帳號與倉庫名稱。');
-   if(!token||/\s/.test(token))throw Error('請填寫有效的 GitHub 存取權杖。');
-   // Browser-native fetch requires the Window receiver, unlike Node and arrow mocks.
-   this.owner=owner;this.repo=repo;this.token=token;this.fetchImpl=fetchImpl.bind(root);this.branch=null;this.sha=undefined;this.busy=false;
-  }
-  async request(suffix='',options={}){
-   let r;try{r=await this.fetchImpl(`https://api.github.com/repos/${this.owner}/${this.repo}${suffix}`,{...options,cache:'no-store',credentials:'omit',redirect:'error',signal:AbortSignal.timeout(20000),headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${this.token}`,'X-GitHub-Api-Version':'2022-11-28',...(options.body?{'Content-Type':'application/json'}:{})}});}catch{throw Error('無法連線 GitHub。帳目仍保留於本機，請稍後重試。');}
-   if(r.status===404&&options.allowMissing)return null;
-   if(!r.ok){const messages={401:'GitHub 權杖無效或已過期，請重新連線。',403:'GitHub 權限不足或請求過多，請檢查倉庫權限並稍後重試。',404:'找不到倉庫或沒有存取權限。',409:'GitHub 帳目已更新，請先下載最新版本再決定如何處理。',422:'GitHub 拒絕寫入，請確認 Contents 讀寫權限及分支規則。'};throw Error(messages[r.status]||`GitHub 儲存失敗（${r.status}）。`);}
-   return r.json();
-  }
-  async ensurePrivate(){const repo=await this.request();if(repo.private!==true)throw Error('請使用私人資料倉庫；本工具不會將帳目上傳到公開倉庫。');if(repo.archived)throw Error('資料倉庫已封存，無法儲存。');if(this.branch&&repo.default_branch!==this.branch)throw Error('倉庫預設分支已改變，請重新連線。');this.branch=repo.default_branch;}
-  async read(){
-   await this.ensurePrivate();
-   const file=await this.request('/contents/ledger.json?ref='+encodeURIComponent(this.branch),{allowMissing:true});
-   if(file===null)return {sha:null,data:null};
-   if(file.type!=='file'||file.encoding!=='base64'||typeof file.content!=='string'||file.size>900000)throw Error('GitHub 帳目格式不支援或超過 900 KB，未變更目前資料。');
-   try{return {sha:file.sha,data:L.validate(JSON.parse(decode(file.content)))};}catch{throw Error('GitHub 帳目格式錯誤，未變更目前資料。');}
-  }
-  accept(remote){this.sha=remote.sha;}
-  async save(data){
-   if(this.busy)throw Error('上一筆 GitHub 儲存尚未完成。');
-   if(this.sha===undefined)throw Error('請先選擇要使用的帳目版本。');
-   const text=JSON.stringify(L.validate(data),null,2);if(new TextEncoder().encode(text).length>900000)throw Error('GitHub 帳目上限為 900 KB，請先匯出備份。');
-   this.busy=true;
-   try{
-    const latest=await this.read();
-    // Recover an acknowledged-but-lost PUT response without repeating the write.
-    if(latest.data&&JSON.stringify(latest.data)===JSON.stringify(data)){this.accept(latest);return;}
-    if(latest.sha!==this.sha)throw Error('其他裝置已更新 GitHub 帳目。自動上傳已暫停，請先匯出本機備份，再下載 GitHub 最新帳目。');
-    const body={message:'Save ledger',content:encode(text),branch:this.branch};if(this.sha!==null)body.sha=this.sha;
-    const result=await this.request('/contents/ledger.json',{method:'PUT',body:JSON.stringify(body)});
-    if(!result.content?.sha)throw Error('GitHub 未確認儲存結果，請重試以核對版本。');this.sha=result.content.sha;
-   }finally{this.busy=false;}
-  }
-  disconnect(){this.token='';this.sha=undefined;}
+ const D=typeof module!=='undefined'&&module.exports?require('./daily.js'):root.DailyLedger;
+ const I=typeof module!=='undefined'&&module.exports?require('./insights.js'):root.LedgerInsights;
+ const round=n=>Math.round(n*100)/100;
+ const pick=(o)=>Object.fromEntries(Object.entries(o).filter(([,v])=>v!==null&&v!==undefined));
+
+ // 小光只拿到彙總：金額、日期與分類。備註、訂閱名稱、帳號資料都不會送出。
+ function dayEntries(c,date){
+  const day=c.days[date];if(!day)return [];
+  const rows=day.meals.map((x,i)=>({name:L.mealNames[i],amount:x.actual??0}));
+  for(const x of day.other)rows.push({name:'其他·'+x.category,amount:x.actual??0});
+  return rows.filter(x=>x.amount>0);
  }
- const api={GitHubStore,encode,decode};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GitHubLedger=api;
+ function buildSummary(c,key,today){
+  const dates=L.dates(key),a=I.analyze(c,key),s=a.stats,b=D.budgetStatus(c,key,s);
+  const elapsed=dates.filter(d=>d<=today);
+  const rows=elapsed.map(date=>{const entries=dayEntries(c,date),spent=round(entries.reduce((n,x)=>n+x.amount,0));
+   const meals=round(entries.filter(x=>!x.name.startsWith('其他')).reduce((n,x)=>n+x.amount,0));
+   const recorded=!!c.days[date]&&(c.days[date].meals.some(x=>x.actual!==null)||c.days[date].other.some(x=>x.actual!==null));
+   const top=entries.slice().sort((x,y)=>y.amount-x.amount)[0];
+   return {date,spent,meals,recorded,top:top?`${top.name} ${round(top.amount)}`:undefined};});
+  const dayLimit=b.dailyTotalBudget,mealLimit=b.dailyMealBudget;
+  const over=rows.filter(r=>(dayLimit!==null&&r.spent>Math.max(0,dayLimit)+0.000001)||(mealLimit!==null&&r.meals>mealLimit+0.000001))
+   .sort((x,y)=>y.spent-x.spent).slice(0,5).map(r=>({date:r.date,spent:r.spent,top:r.top}));
+  const heavy=rows.filter(r=>r.spent>0).sort((x,y)=>y.spent-x.spent).slice(0,3).map(r=>({date:r.date,spent:r.spent,top:r.top}));
+  const savings=c.budgets?c.budgets.savings:c.savingTarget;
+  return pick({
+   period:{key,start:dates[0],end:dates[dates.length-1],today,daysTotal:dates.length,daysElapsed:elapsed.length},
+   income:c.income,
+   budgets:pick({meals:s.buckets.meals.budget,other:s.buckets.other.budget,fixed:s.buckets.fixed.budget,savings}),
+   spent:{meals:s.buckets.meals.spent,other:s.buckets.other.spent,fixed:s.buckets.fixed.spent,total:s.spent},
+   projectedSaving:s.projected,
+   remainingBudget:b.remainingTotal,
+   dailyAllowance:dayLimit===null?null:round(dayLimit),
+   recordedDays:rows.filter(r=>r.recorded).length,
+   overspentDays:over.length?over:undefined,
+   heaviestDays:heavy.length?heavy:undefined,
+   categories:a.categories.slice(0,5).map(x=>({name:x.name,spent:x.spent}))
+  });
+ }
+ function fingerprint(summary){
+  const text=JSON.stringify(summary);let h=5381;
+  for(let i=0;i<text.length;i++)h=((h<<5)+h+text.charCodeAt(i))>>>0;
+  return h.toString(36);
+ }
+ // 資料不足時不呼叫模型，避免對空帳本胡說八道。
+ function hasData(summary){return (summary.spent?.meals||0)+(summary.spent?.other||0)>0;}
+ const messages={401:'需要先用 Google 登入，我才能看你的帳。',429:'慢一點，我還在看上一份帳，等幾秒再問。',413:'這期的帳太長了，我讀不完。',503:'我現在連不上腦袋，晚點再試。',502:'我這次想不出話來，再問一次看看。'};
+ async function requestReview(summary,fetchImpl=globalThis.fetch){
+  const response=await fetchImpl('/minimalist-ledger-auth/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(summary)});
+  let data={};try{data=await response.json();}catch{}
+  if(!response.ok||typeof data.reply!=='string'||!data.reply)throw Error(messages[response.status]||'小光暫時無法點評，請稍後再試。');
+  return data.reply;
+ }
+ const api={buildSummary,fingerprint,hasData,requestReview};
+ if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.LedgerAI=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
 // --- google-config.js ---
@@ -451,7 +464,7 @@ window.LEDGER_GOOGLE_CONFIG = {
 })(typeof globalThis!=='undefined'?globalThis:this);
 
 // --- app.js ---
-/* 日常留白 — GitHub private-repository sync; no external dependencies. */
+/* 日常留白 — local-first ledger with Google Drive sync; no external dependencies. */
 'use strict';
 const L=Ledger, $=s=>document.querySelector(s), LOCAL_KEY='minimalist-ledger-v1', ACCOUNT_KEY='minimalist-ledger-account';
 // 字型樣式表以 media=print 非阻塞載入；腳本在此切換生效（取代內嵌 onload，以符合 CSP）。
@@ -464,7 +477,7 @@ let selectedDate=L.iso(new Date()),editingCycle=selected;
 let currentView='daily';
 const D=DailyLedger;
 const I=LedgerInsights;
-let cloudClient=null,cloudAuto=false,cloudBusy=false,cloudTimer=null,cloudSynced=null;
+const AI=LedgerAI;
 const money=n=>n===null?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statusLabels={login:'登入中',guest:'未登入',syncing:'雲端同步中',pending:'雲端尚未同步',latest:'雲端均最新'};
@@ -476,7 +489,7 @@ function syncText(element,message,phase=''){
  element.innerHTML='<span class="sync-coin is-'+phase+'" role="img" aria-label="'+label+'">'+Array.from(label).map((letter,index)=>'<span class="coin-letter" aria-hidden="true" style="--coin-index:'+index+'">'+letter+'</span>').join('')+'</span>'+(detail?'<span class="sync-detail"> · '+esc(detail)+'</span>':'');
 }
 function syncBadge(phase=''){
- if(!phase)phase=googleMode||cloudClient?'pending':'guest';
+ if(!phase)phase=googleMode?'pending':'guest';
  if(phase===badgeState)return;
  badgeState=phase;
  syncText($('#syncBadge'),statusLabels[phase],phase);
@@ -544,7 +557,39 @@ function renderAnalysis(){
  $('#categoryTable').innerHTML=a.categories.length?`<table><caption>其他支出分類</caption><thead><tr><th>分類</th><th>實際金額</th></tr></thead><tbody>${a.categories.map(x=>`<tr><td>${esc(x.name)}</td><td>NT$ ${money(x.spent)}</td></tr>`).join('')}</tbody></table>`:'<p class="empty-state">尚無「其他」分類消費，記帳後即時更新。</p>';
  $('#analysisNote').textContent=`${selected} · ${s.unknown?'預算尚未設定完整；':''}僅統計實際輸入的消費，不含儲蓄。`;
  $('#analysisMonth').value=selected;
+ renderAi();
 }
+// 小光點評：只送彙總（金額、日期、分類），結果只存在這個瀏覽器。
+let aiBusy=false,aiError='';
+const aiCacheKey=()=>KEY+'-xiaoguang';
+function aiSaved(){try{return JSON.parse(localStorage.getItem(aiCacheKey())||'{}');}catch{return {};}}
+function aiSave(cycleKey,entry){try{const all=aiSaved();all[cycleKey]=entry;const keys=Object.keys(all).sort().slice(-6);localStorage.setItem(aiCacheKey(),JSON.stringify(Object.fromEntries(keys.map(k=>[k,all[k]]))));}catch{}}
+const botBubble=text=>`<div class="chat-row bot"><img class="chat-avatar" src="xiaoguang.png" alt="" width="44" height="44"><div class="chat-body"><span class="chat-name">小光</span><p class="chat-bubble">${esc(text)}</p></div></div>`;
+const meBubble=text=>`<div class="chat-row me"><p class="chat-bubble">${esc(text)}</p></div>`;
+function renderAi(){
+ const box=$('#aiThread');if(!box)return;
+ const summary=AI.buildSummary(cycle(),selected,L.iso(new Date())),print=AI.fingerprint(summary),saved=aiSaved()[selected],ask=$('#aiAsk');
+ let html;
+ if(aiBusy)html=meBubble('幫我點評這期開銷')+'<div class="chat-row bot"><img class="chat-avatar" src="xiaoguang.png" alt="" width="44" height="44"><div class="chat-body"><span class="chat-name">小光</span><p class="chat-bubble typing" aria-label="小光正在看帳"><i></i><i></i><i></i></p></div></div>';
+ else if(!AI.hasData(summary))html=botBubble('這期還沒有花費可以點評。先記幾筆，我再來挑毛病。');
+ else if(aiError)html=meBubble('幫我點評這期開銷')+botBubble(aiError);
+ else if(saved)html=meBubble('幫我點評這期開銷')+botBubble(saved.reply)+(saved.print===print?'':'<p class="chat-stale">帳目已更新，這是更新前的點評。</p>');
+ else html=botBubble(googleMode?'想知道我怎麼看這期的帳？按下面的按鈕，我會挑出該省的地方。':'登入 Google 之後，我才能幫你點評這期的帳。');
+ box.innerHTML=html;
+ ask.disabled=aiBusy||!googleMode||!AI.hasData(summary);
+ ask.textContent=aiBusy?'小光看帳中…':saved?'重新點評':'請小光點評';
+ box.scrollTop=box.scrollHeight;
+}
+async function askAi(){
+ if(aiBusy||!googleMode)return;
+ const cycleKey=selected,summary=AI.buildSummary(cycle(),cycleKey,L.iso(new Date()));
+ if(!AI.hasData(summary))return;
+ aiBusy=true;aiError='';renderAi();
+ try{aiSave(cycleKey,{print:AI.fingerprint(summary),reply:await AI.requestReview(summary)});}
+ catch(e){aiError=e.message||'小光暫時無法點評，請稍後再試。';}
+ finally{aiBusy=false;if(currentView==='analysis')renderAi();}
+}
+$('#aiAsk').onclick=askAi;
 function show(title,body,onSave){if(accountSwitching){toast("正在切換帳號，請稍候。");return;}editingCycle=selected;$('#editTitle').textContent=title;$('#editBody').innerHTML=body;$('#editError').textContent='';editing=onSave;$('#editor').showModal();}
 function num(label,id,value,fieldClass=''){
  const legacy=value!=null&&!Number.isInteger(value);
@@ -654,7 +699,7 @@ $('#export').onclick=()=>download(blocked?(raw||JSON.stringify(state)):JSON.stri
 $('#import').onclick=()=>$('#file').click();$('#file').onchange=async e=>{const file=e.target.files[0];if(!file)return;const importKey=KEY,importRaw=raw;try{if(file.size>10*1024*1024)throw Error('備份上限為 10 MB。');const candidate=L.validate(JSON.parse(await file.text()));if(KEY!==importKey||raw!==importRaw)throw Error('帳號或帳目已變更，請重新選擇備份。');if(!confirm(`備份包含 ${Object.keys(candidate.cycles).length} 個週期。匯入會取代所有目前帳目；系統會先下載目前資料備份。確定匯入？`))return;
  if(raw!==null)download(raw,`minimalist-before-import-${Date.now()}.json`);
  const previousBlocked=blocked;blocked=false;try{commit(candidate);}catch(err){blocked=previousBlocked;throw err;}render();toast('備份已匯入。');}catch(err){toast(err.message||'匯入失敗，原資料保持不變。');}finally{e.target.value='';}};
-window.addEventListener('storage',e=>{if(e.key===KEY){cloudAuto=false;clearTimeout(cloudTimer);if(cloudClient)cloudText('另一分頁已變更帳目 · 自動上傳已暫停，請重新整理',true);toast('另一分頁已變更資料，請重新整理後繼續。');$('#saveStatus').textContent='資料已在另一分頁變更，請重新整理';}});
+window.addEventListener('storage',e=>{if(e.key===KEY){toast('另一分頁已變更資料，請重新整理後繼續。');$('#saveStatus').textContent='資料已在另一分頁變更，請重新整理';}});
 function renderDaily(){
  const key=L.cycleKey(new Date(selectedDate+'T12:00:00')),c=state.cycles[key]||L.defaults(),s=D.summary(c,selectedDate),date=new Date(selectedDate+'T12:00:00');
  $('#dayTitle').textContent=`${date.getMonth()+1} 月 ${date.getDate()} 日`;
@@ -694,68 +739,11 @@ window.addEventListener('focus',()=>dayWatcher.check());document.addEventListene
 render();
 if(blocked)toast('無法讀取本機帳目，請到「設定」匯出原始資料或匯入有效備份。');
 
-function cloudText(message,error=false,phase=''){if(error&&!phase)phase='pending';syncText($('#cloudStatus'),message,phase);syncText($('#cloudMessage'),message,phase);if(!googleMode)syncBadge(phase);$('#cloudStatus').classList.toggle('error',error);if(error)toast(message);}
-function cloudControls(){for(const id of ['cloudConnect','cloudPull','cloudPush','cloudDisconnect'])$('#'+id).disabled=cloudBusy;$('#cloudForm').hidden=!!cloudClient;$('#cloudActions').hidden=!cloudClient;}
 function currentJSON(){return JSON.stringify(state);}
 function queueCloud(){
  if(googleMode){googleQueue();return;}
- if(!cloudClient||!cloudAuto){if(cloudClient)cloudText('已存本機，尚未啟用自動上傳。',false,'pending');else syncBadge('pending');return;}
- clearTimeout(cloudTimer);cloudText('已存本機 · 等待上傳 GitHub',false,'pending');
- cloudTimer=setTimeout(flushCloud,1200);
+ syncBadge('pending');
 }
-async function flushCloud(){
- if(!cloudClient||!cloudAuto||cloudBusy)return;
- const snapshot=currentJSON();cloudBusy=true;cloudControls();cloudText('已存本機 · 正在上傳 GitHub…',false,'syncing');
- try{if(ledgerStorage.getItem(KEY)!==raw)throw Error('另一分頁已變更帳目，請重新整理。');await cloudClient.save(JSON.parse(snapshot));cloudSynced=snapshot;$('#cloudRetry').hidden=true;if(cloudAuto&&snapshot===currentJSON())cloudText('已同步至 GitHub · '+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}),false,'latest');}
- catch(e){cloudAuto=false;$('#cloudRetry').hidden=false;cloudText('僅存本機 · '+e.message,true);}
- finally{cloudBusy=false;cloudControls();if(cloudAuto&&currentJSON()!==cloudSynced)queueCloud();}
-}
-function guardCloud(){if(googleMode||accountSwitching)throw Error('請先登出 Google，再使用 GitHub。');if(cloudBusy)throw Error('GitHub 正在處理上一個操作，請稍候。');if(!cloudClient)throw Error('請先連線 GitHub。');if($('#editor').open)throw Error('請先儲存或關閉目前的編輯視窗。');}
-$('#cloudOpen').onclick=()=>{$('#cloud').showModal();cloudControls();};
-$('#cloudClose').onclick=()=>{$('#cloudToken').value='';$('#cloud').close();};
-$('#cloud').addEventListener('close',()=>{$('#cloudToken').value='';});
-$('#cloudForm').onsubmit=async e=>{
- e.preventDefault();if(googleMode||accountSwitching){cloudText('請先登出 Google，再使用 GitHub。',true);return;}if(cloudBusy)return;cloudBusy=true;cloudControls();cloudText('正在檢查私人資料倉庫…');
- let client;
- try{
-  if(location.protocol!=='https:'&&!['127.0.0.1','localhost'].includes(location.hostname))throw Error('請使用 HTTPS 正式網站連線 GitHub。');
-  client=new GitHubLedger.GitHubStore({owner:$('#cloudOwner').value.trim(),repo:$('#cloudRepo').value.trim(),token:$('#cloudToken').value.trim()});
-  $('#cloudToken').value='';const remote=await client.read();cloudClient=client;
-  if(!blocked&&remote.data&&JSON.stringify(remote.data)===currentJSON()){client.accept(remote);cloudAuto=true;cloudSynced=currentJSON();cloudText('已同步至 GitHub · 帳目版本一致',false,'latest');}
-  else cloudText(remote.data?'已連線 · 請選擇下載 GitHub 帳目，或上傳此裝置帳目。':'已連線 · 倉庫尚無帳目，請按「上傳此裝置帳目」開始自動儲存。');
- }catch(err){client?.disconnect();cloudText(err.message,true);}finally{$('#cloudToken').value='';cloudBusy=false;cloudControls();}
-};
-async function pullCloud(){
- try{
-  guardCloud();cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在讀取 GitHub 帳目…',false,'syncing');const before=raw,remote=await cloudClient.read();
-  if(!remote.data)throw Error('GitHub 尚無 ledger.json，請先上傳此裝置帳目。');
-  if(raw!==before)throw Error('本機帳目剛有變更，請重新下載以確認版本。');
-  if(!confirm('下載會取代此裝置目前帳目，並先匯出本機備份。確定使用 GitHub 版本？')){cloudText('已取消下載 · 自動上傳暫停，請重新選擇帳目版本');return;}
-  if(raw!==null)download(raw,`minimalist-before-github-${Date.now()}.json`);
-  const wasBlocked=blocked;blocked=false;try{commit(remote.data,true);}catch(err){blocked=wasBlocked;throw err;}
-  cloudClient.accept(remote);cloudSynced=currentJSON();cloudAuto=true;$('#cloudRetry').hidden=true;render();cloudText('已下載 GitHub 帳目 · 後續儲存將自動上傳',false,'latest');
- }catch(e){cloudText('下載未完成 · '+e.message,true);}finally{cloudBusy=false;cloudControls();}
-}
-async function uploadCloud(){
- try{
-  guardCloud();if(blocked)throw Error('本機資料無法讀取，請先匯入有效備份或下載 GitHub 帳目。');
-  cloudAuto=false;clearTimeout(cloudTimer);cloudBusy=true;cloudControls();cloudText('正在核對 GitHub 帳目…',false,'syncing');const before=raw,remote=await cloudClient.read();
-  if(raw!==before)throw Error('本機帳目剛有變更，請重新上傳以確認版本。');
-  if(remote.data&&JSON.stringify(remote.data)!==currentJSON()){
-   if(!confirm('GitHub 上有不同版本。上傳將取代該版本，並先下載 GitHub 舊版本備份。確定使用此裝置帳目？')){cloudText('已取消上傳 · 自動上傳暫停，請重新選擇帳目版本');return;}
-   download(JSON.stringify(remote.data,null,2),`minimalist-github-before-replace-${Date.now()}.json`);
-  }
-  cloudClient.accept(remote);cloudAuto=true;cloudText('準備上傳 GitHub…');
- }catch(e){cloudText('上傳未完成 · '+e.message,true);}finally{cloudBusy=false;cloudControls();}
- if(cloudAuto)await flushCloud();
-}
-$('#cloudPull').onclick=pullCloud;$('#cloudPush').onclick=uploadCloud;$('#cloudRetry').onclick=uploadCloud;
-$('#cloudDisconnect').onclick=()=>{
- if(cloudBusy)return;
- if(cloudAuto&&cloudSynced!==currentJSON()&&!confirm('尚有帳目未上傳，資料會留在本機。確定中斷連線？'))return;
- clearTimeout(cloudTimer);cloudAuto=false;cloudClient?.disconnect();cloudClient=null;cloudSynced=null;$('#cloudRetry').hidden=true;cloudControls();cloudText('GitHub 已中斷 · 帳目目前僅存於本機');
-};
-window.addEventListener('beforeunload',e=>{if(cloudClient&&cloudSynced!==currentJSON()){e.preventDefault();e.returnValue='';}});
 
 // --- google-sync.js ---
 'use strict';
@@ -774,7 +762,7 @@ const GOOGLE_LOGIN_ISSUES={
 let promptReady=false,promptHandled=false;
 const laterKey='minimalist-ledger-login-later';
 function maybePromptLogin(){
- if(!promptReady||promptHandled||googleMode||cloudClient||currentView!=='daily'||document.querySelector('dialog[open]')?.open)return;
+ if(!promptReady||promptHandled||googleMode||currentView!=='daily'||document.querySelector('dialog[open]')?.open)return;
  try{if(sessionStorage.getItem(laterKey))return;}catch{}
  $('#loginPrompt').showModal();
 }
@@ -800,9 +788,9 @@ function googleControls(){
  if(popupLink)popupLink.hidden=googleMode||!(googleConnection?.cfg?.keepSignedIn||window.LEDGER_GOOGLE_CONFIG?.keepSignedIn&&!popupLoginRequested());
  for(const id of ['googlePull','googlePush','googleMigrate','googleLogout'])$('#'+id).disabled=googleBusy||!googleMode;
  $('#googleRecover').disabled=googleBusy;
- $('#googleActions').hidden=!googleMode;$('#cloudOpen').disabled=googleMode||googleBusy;
+ $('#googleActions').hidden=!googleMode;
 }
-function googleGuard(){if(googleBusy||cloudBusy||accountSwitching)throw Error('資料正在處理中，請稍候。');if($('#editor').open)throw Error('請先儲存或關閉編輯視窗。');}
+function googleGuard(){if(googleBusy||accountSwitching)throw Error('資料正在處理中，請稍候。');if($('#editor').open)throw Error('請先儲存或關閉編輯視窗。');}
 function googleDirty(){return raw!==null&&currentJSON()!==googleSynced;}
 function googleCache(){
  // A failed checkpoint leaves the saved notebook intact and can only cause another sync attempt.
@@ -857,7 +845,7 @@ function googleLoginReturn(){
 }
 async function prepareGoogle(){
  if(!window.LEDGER_GOOGLE_CONFIG){googleText("Google 登入尚未開放，目前可先使用本機記帳。");googleControls();return;}
- googleGuard();googleBusy=true;googleControls();if(!cloudClient)syncBadge('login');googleText('正在準備 Google 登入…');
+ googleGuard();googleBusy=true;googleControls();syncBadge('login');googleText('正在準備 Google 登入…');
  try{
   const cfg=GoogleLedger.config({...window.LEDGER_GOOGLE_CONFIG,...(popupLoginRequested()?{keepSignedIn:false}:{})});
   const loginIssue=googleLoginReturn();
@@ -873,11 +861,10 @@ async function prepareGoogle(){
  catch(e){googleText(GoogleLedger.message(e),true);}finally{
   googleBusy=false;accountSwitching=false;googleControls();
   promptReady=true;
-  if(!googleMode&&!cloudClient){syncBadge();maybePromptLogin();}
+  if(!googleMode){syncBadge();maybePromptLogin();}
  }
 }
 function activateGoogle(user,client){
-  clearTimeout(cloudTimer);cloudAuto=false;cloudClient?.disconnect();cloudClient=null;cloudSynced=null;cloudControls();cloudText('已切換至 Google · GitHub 自動上傳已停止');
   googleNeedsSignIn=false;
   googleEpoch++;googleClient=client;googleMode=true;googleAuto=false;googleSynced=null;
   syncBadge('pending');
@@ -906,7 +893,7 @@ async function loginGoogle(){
    googleNeedsSignIn=false;googleBusy=false;accountSwitching=false;googleControls();
   }else activateGoogle(user,googleConnection.store(user));
   await resumeGoogle();
- }catch(e){googleAuthError(e);if(!googleMode&&!cloudClient)syncBadge();}finally{googleBusy=false;accountSwitching=false;googleControls();}
+ }catch(e){googleAuthError(e);if(!googleMode)syncBadge();}finally{googleBusy=false;accountSwitching=false;googleControls();}
 }
 function googleAuthError(error){
  if(error.code==='sign_in_required')googleNeedsSignIn=true;
@@ -987,7 +974,7 @@ async function pushGoogle(migrate=false){
  const epoch=googleEpoch;
  try{googleGuard();if(!googleClient)throw Error('請先使用 Google 登入。');if(blocked)throw Error('請先匯入有效備份或讀取雲端帳目。');checkGoogleLocal();
   let data=L.clone(state);
-  if(migrate){const source=localStorage.getItem(LOCAL_KEY);if(source===null)throw Error('原本的本機帳目是空的。請先登出 Google，下載 GitHub 帳目或匯入備份，再登入移轉。');data=L.migrate(JSON.parse(source));if(!confirm('將原本的本機帳目複製到此 Google 帳號？原本的本機與 GitHub 資料會保留。'))return;}
+  if(migrate){const source=localStorage.getItem(LOCAL_KEY);if(source===null)throw Error('原本的本機帳目是空的。請先登出 Google，匯入備份後再登入移轉。');data=L.migrate(JSON.parse(source));if(!confirm('將原本的本機帳目複製到此 Google 帳號？原本的本機資料會保留。'))return;}
   googleAuto=false;clearTimeout(googleTimer);googleBusy=true;accountSwitching=true;googleControls();const client=googleClient;googleText('正在確認雲端版本…',false,'syncing');const remote=await client.read();if(epoch!==googleEpoch)return;checkGoogleLocal();if(remote.conflicts){showDriveConflicts(remote.conflicts);throw Error('請先選擇衝突版本並讀取雲端，再上傳。');}
   if(remote.data&&JSON.stringify(remote.data)!==JSON.stringify(data)){if(!confirm('Google 已有不同帳目。確認以選定帳目取代？會先下載被取代的雲端備份。')){googleText('已取消上傳。',false,'pending');return;}download(JSON.stringify(remote.data,null,2),`minimalist-google-before-replace-${Date.now()}.json`);}
   if(migrate&&raw!==null&&currentJSON()!==JSON.stringify(data))download(raw,`minimalist-before-migration-${Date.now()}.json`);
@@ -1014,7 +1001,7 @@ $('#loginNow').onclick=()=>{
  else $('#googleOpen').onclick();
 };
 document.addEventListener?.('close',event=>{if(event.target?.id!=='loginPrompt')maybePromptLogin();},true);
-window.addEventListener('pageshow',event=>{if(event.persisted&&!googleMode&&!cloudClient)syncBadge();});
+window.addEventListener('pageshow',event=>{if(event.persisted&&!googleMode)syncBadge();});
 showLoginDuration();
 syncBadge();
 $('#googleClose').onclick=()=>$('#googleDialog').close();$('#googleLogin').onclick=loginGoogle;
@@ -1022,7 +1009,7 @@ $('#googlePull').onclick=()=>pullGoogle();$('#googlePush').onclick=()=>pushGoogl
 $('#googleRecover').onclick=()=>{if(googleLegacyBackup!==null)download(googleLegacyBackup,'minimalist-old-tab-'+Date.now()+'.json');};
 window.addEventListener('focus',resumeGoogle);
 window.addEventListener('online',resumeGoogle);
-window.addEventListener('offline',()=>{if(googleMode)googleText('目前離線，連線後會再核對雲端帳目。',false,'pending');else if(cloudClient)syncBadge('pending');});
+window.addEventListener('offline',()=>{if(googleMode)googleText('目前離線，連線後會再核對雲端帳目。',false,'pending');});
 document.addEventListener?.('visibilitychange',()=>{if(document.hidden){if(googleMode&&googleDirty())flushGoogle();}else resumeGoogle();});
 googleControls();
 
@@ -1032,4 +1019,4 @@ $('#googleResolve').onclick=async()=>{if(googleBusy||!googleClient)return;if(!co
 if(window.LEDGER_GOOGLE_CONFIG)prepareGoogle().catch(e=>googleText(GoogleLedger.message(e),true));else googleText('Google 登入尚未開放，目前可先使用本機記帳。');
 
 // --- service worker ---
-if(typeof navigator!=='undefined'&&navigator.serviceWorker&&location.protocol==='https:')addEventListener('load',()=>navigator.serviceWorker.register('sw.js?v=1.9.0').catch(()=>{}));
+if(typeof navigator!=='undefined'&&navigator.serviceWorker&&location.protocol==='https:')addEventListener('load',()=>navigator.serviceWorker.register('sw.js?v=1.10.0').catch(()=>{}));
